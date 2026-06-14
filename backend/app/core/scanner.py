@@ -30,8 +30,11 @@ def _movie_source_exists(source: Path, source_name: str) -> bool:
     if item.exists():
         return True
     return any(
-        f.is_file() and f.suffix.lower() in VIDEO_EXT and not _is_incomplete(f)
-        for f in source.glob(f"{source_name}.*")
+        f.is_file()
+        and f.stem == source_name
+        and f.suffix.lower() in VIDEO_EXT
+        and not _is_incomplete(f)
+        for f in source.iterdir()
     )
 
 
