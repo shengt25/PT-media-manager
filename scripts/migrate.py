@@ -61,9 +61,18 @@ def _infer_thumb_path(poster_path: str) -> Path:
     return Path(poster_path).with_name(".ptmm-thumb.jpg")
 
 
+def _httpx_client(proxy: str | None, timeout: int) -> httpx.Client:
+    if not proxy:
+        return httpx.Client(timeout=timeout)
+    try:
+        return httpx.Client(proxy=proxy, timeout=timeout)
+    except TypeError:
+        return httpx.Client(proxies=proxy, timeout=timeout)
+
+
 def _fetch_tmdb_poster_path(tmdb_id: int, media_type: str, api_key: str, proxy: str | None = None) -> str | None:
     endpoint = "movie" if media_type == "movie" else "tv"
-    with httpx.Client(proxy=proxy, timeout=15) as client:
+    with _httpx_client(proxy, timeout=15) as client:
         response = client.get(
             f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}",
             headers={"Authorization": f"Bearer {api_key}"},
@@ -75,7 +84,7 @@ def _fetch_tmdb_poster_path(tmdb_id: int, media_type: str, api_key: str, proxy: 
 
 def _download_thumb(thumb_path: Path, poster_path: str, proxy: str | None = None) -> bool:
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
-    with httpx.Client(proxy=proxy, timeout=20) as client:
+    with _httpx_client(proxy, timeout=20) as client:
         response = client.get(f"{TMDB_IMAGE_BASE}{poster_path}")
         response.raise_for_status()
         thumb_path.write_bytes(response.content)
