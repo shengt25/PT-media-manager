@@ -15,10 +15,7 @@ router = APIRouter(prefix="/scrape", tags=["scrape"])
 def _delete_generated_files(media):
     if not media.generated_files:
         return
-    try:
-        paths = json.loads(media.generated_files)
-    except (json.JSONDecodeError, TypeError):
-        return
+    paths = json.loads(media.generated_files)
     for path_str in paths:
         p = Path(path_str)
         if p.exists():
@@ -34,12 +31,10 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
             link_dir = Path(entry.link_path) / media.source_name
             video_stem = find_main_video_stem(link_dir) or media.source_name
             prefix = f"{video_stem}-"
-            folder_exists_with_artwork = (Path(entry.link_path) / media.source_name / f"{prefix}poster.jpg").exists()
             generated = download_artwork(
                 entry.link_path, media.source_name,
                 tmdb_data.get("poster_path"),
                 tmdb_data.get("backdrop_path"),
-                skip_if_exists=folder_exists_with_artwork,
                 filename_prefix=prefix,
                 proxy=proxy,
             )

@@ -38,10 +38,7 @@ def list_media(entry_id: int, session: Session = Depends(get_session)):
 @router.get("/{media_id}/poster")
 def get_poster(media_id: int):
     generated_files = _get_generated_files(media_id)
-    try:
-        paths = json.loads(generated_files)
-    except (json.JSONDecodeError, TypeError):
-        raise HTTPException(404, "Poster not found")
+    paths = json.loads(generated_files)
     poster_path = next((p for p in paths if p.endswith("poster.jpg")), None)
     if poster_path is None or not Path(poster_path).exists():
         raise HTTPException(404, "Poster not found")
@@ -51,10 +48,7 @@ def get_poster(media_id: int):
 @router.get("/{media_id}/thumb")
 def get_thumb(media_id: int):
     generated_files = _get_generated_files(media_id)
-    try:
-        paths = json.loads(generated_files)
-    except (json.JSONDecodeError, TypeError):
-        paths = []
+    paths = json.loads(generated_files)
     thumb_path = next((p for p in paths if Path(p).name.endswith(".ptmm-thumb.jpg")), None)
     if thumb_path and Path(thumb_path).exists():
         return FileResponse(thumb_path, media_type="image/jpeg")

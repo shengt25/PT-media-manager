@@ -52,10 +52,7 @@ def write_tvshow_nfo(link_path: str, name: str, data: dict) -> str:
 def _find_nfo_path(generated_files: str | None, media_type: str) -> Path | None:
     if not generated_files:
         return None
-    try:
-        paths = json.loads(generated_files)
-    except (json.JSONDecodeError, TypeError):
-        return None
+    paths = json.loads(generated_files)
     for f in paths:
         if media_type == "movie":
             if f.endswith(".nfo"):

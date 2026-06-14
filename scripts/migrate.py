@@ -63,12 +63,7 @@ def _infer_thumb_path(poster_path: str) -> Path:
 
 
 def _httpx_client(proxy: str | None, timeout: int) -> httpx.Client:
-    if not proxy:
-        return httpx.Client(timeout=timeout)
-    try:
-        return httpx.Client(proxy=proxy, timeout=timeout)
-    except TypeError:
-        return httpx.Client(proxies=proxy, timeout=timeout)
+    return httpx.Client(proxy=proxy, timeout=timeout)
 
 
 def _fetch_tmdb_poster_path(tmdb_id: int, media_type: str, api_key: str, proxy: str | None = None) -> str | None:

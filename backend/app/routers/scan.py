@@ -34,10 +34,7 @@ def scan_all(session: Session = Depends(get_session)):
         auto_removed = []
         for media in result.link_missing:
             if media.generated_files:
-                try:
-                    paths = json.loads(media.generated_files)
-                except (json.JSONDecodeError, TypeError):
-                    paths = []
+                paths = json.loads(media.generated_files)
                 for f in paths:
                     Path(f).unlink(missing_ok=True)
             crud.media_delete(session, media)

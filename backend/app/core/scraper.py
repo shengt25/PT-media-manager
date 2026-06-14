@@ -2,9 +2,9 @@ import httpx
 from pathlib import Path
 from guessit import guessit
 from app.config import settings
+from app.core.episodes import normalize_episode_filenames
 from app.core.nfo import write_episode_nfo
 from app.core.scanner import VIDEO_EXT
-from app.utils import httpx_client
 
 TMDB_BASE = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original"
@@ -19,12 +19,16 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {settings.tmdb_api_key}"}
 
 
+def _client(proxy: str | None, timeout: int) -> httpx.Client:
+    return httpx.Client(proxy=proxy, timeout=timeout)
+
+
 def search_tmdb(query: str, media_type: str, year: int | None = None, language: str = "zh-CN", proxy: str | None = None) -> list[dict]:
     endpoint = "movie" if media_type == "movie" else "tv"
     params = {"query": query, "language": language}
     if year:
         params["year"] = year
-    with httpx_client(proxy, timeout=20) as client:
+    with _client(proxy, timeout=20) as client:
         r = client.get(f"{TMDB_BASE}/search/{endpoint}", params=params, headers=_headers())
         r.raise_for_status()
     results = r.json().get("results", [])[:5]
@@ -53,13 +57,13 @@ def _fetch_tmdb_poster(client: httpx.Client, tmdb_id: int, media_type: str, imag
 
 
 def fetch_tmdb_poster_path(tmdb_id: int, media_type: str, language: str = "en-US", proxy: str | None = None) -> str | None:
-    with httpx_client(proxy, timeout=20) as client:
+    with _client(proxy, timeout=20) as client:
         return _fetch_tmdb_poster(client, tmdb_id, media_type, language)
 
 
 def fetch_tmdb_detail(tmdb_id: int, media_type: str, language: str = "zh-CN", image_language: str | None = None, proxy: str | None = None) -> dict:
     endpoint = "movie" if media_type == "movie" else "tv"
-    with httpx_client(proxy, timeout=20) as client:
+    with _client(proxy, timeout=20) as client:
         r = client.get(
             f"{TMDB_BASE}/{endpoint}/{tmdb_id}",
             params={"language": language},
@@ -91,16 +95,14 @@ def fetch_tmdb_detail(tmdb_id: int, media_type: str, language: str = "zh-CN", im
     }
 
 
-def download_artwork(link_path: str, name: str, poster_path: str | None, backdrop_path: str | None, skip_if_exists: bool = False, filename_prefix: str = "", proxy: str | None = None) -> list[str]:
+def download_artwork(link_path: str, name: str, poster_path: str | None, backdrop_path: str | None, filename_prefix: str = "", proxy: str | None = None) -> list[str]:
     base = Path(link_path) / name
     base.mkdir(parents=True, exist_ok=True)
     poster_name = f"{filename_prefix}poster.jpg"
     fanart_name = f"{filename_prefix}fanart.jpg"
-    if skip_if_exists and (base / poster_name).exists():
-        return []
     generated = []
     try:
-        with httpx_client(proxy, timeout=45) as client:
+        with _client(proxy, timeout=45) as client:
             if poster_path:
                 r = client.get(f"{TMDB_IMAGE_BASE}{poster_path}")
                 r.raise_for_status()
@@ -128,7 +130,7 @@ def download_poster_thumbnail(link_path: str, name: str, poster_path: str | None
     thumb_path = get_poster_thumb_path(link_path, name)
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with httpx_client(proxy, timeout=30) as client:
+        with _client(proxy, timeout=30) as client:
             r = client.get(f"{TMDB_THUMB_IMAGE_BASE}{poster_path}")
             r.raise_for_status()
             thumb_path.write_bytes(r.content)
@@ -140,7 +142,7 @@ def download_poster_thumbnail(link_path: str, name: str, poster_path: str | None
 
 
 def fetch_tmdb_episode(tmdb_id: int, season: int, episode: int, language: str = "zh-CN", proxy: str | None = None) -> dict:
-    with httpx_client(proxy, timeout=20) as client:
+    with _client(proxy, timeout=20) as client:
         r = client.get(
             f"{TMDB_BASE}/tv/{tmdb_id}/season/{season}/episode/{episode}",
             params={"language": language},
@@ -165,12 +167,14 @@ def fetch_tmdb_episode(tmdb_id: int, season: int, episode: int, language: str = 
 def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str = "zh-CN", proxy: str | None = None) -> list[str]:
     base = Path(link_path) / name
     generated = []
-    with httpx_client(proxy, timeout=30) as client:
-        for video_file in sorted(base.rglob("*")):
-            if not video_file.is_file():
-                continue
-            if video_file.suffix.lower() not in VIDEO_EXT:
-                continue
+    video_files = [
+        video_file
+        for video_file in base.rglob("*")
+        if video_file.is_file() and video_file.suffix.lower() in VIDEO_EXT
+    ]
+    video_files = normalize_episode_filenames(video_files, base)
+    with _client(proxy, timeout=30) as client:
+        for video_file in sorted(video_files):
             nfo_path = video_file.with_suffix(".nfo")
             if nfo_path.exists():
                 continue
@@ -186,10 +190,9 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
                 season = 1
             if isinstance(season, list):
                 season = season[0]
-            try:
-                ep_data = fetch_tmdb_episode(tmdb_id, int(season), int(episode), language, proxy)
-            except Exception:
-                ep_data = {"season": int(season), "episode": int(episode), "tmdb_id": None, "still_path": None}
+            season = int(season)
+            episode = int(episode)
+            ep_data = fetch_tmdb_episode(tmdb_id, season, episode, language, proxy)
             path = write_episode_nfo(video_file, ep_data)
             generated.append(path)
             if ep_data.get("still_path"):
