@@ -20,6 +20,7 @@ if [[ -f "$STATE_FILE" ]]; then
         echo "  Domain: $DOMAIN"
         echo "  Deploy user: $DEPLOY_USER"
         echo "  Ports: https=$HTTPS_PORT backend=$BACKEND_PORT"
+        echo "  Frontend root: ${FRONTEND_ROOT:-/var/www/ptmm}"
     fi
     echo ""
     read -rp "Reuse this configuration and reinstall? [Y/n]: " REUSE_CHOICE
@@ -106,6 +107,9 @@ if [[ "$REUSE_CONFIG" == false ]]; then
         read -rp "Backend port (default: 8000): " BACKEND_PORT
         BACKEND_PORT="${BACKEND_PORT:-8000}"
 
+        read -rp "Frontend static directory (default: /var/www/ptmm): " FRONTEND_ROOT
+        FRONTEND_ROOT="${FRONTEND_ROOT:-/var/www/ptmm}"
+
         echo ""
         echo "SSL certificate paths:"
         DEFAULT_CERT="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
@@ -133,6 +137,23 @@ if [[ "$REUSE_CONFIG" == false ]]; then
 else
     echo ""
     echo "Reusing saved configuration."
+    if [[ "$MODE" == "public" ]]; then
+        FRONTEND_ROOT="${FRONTEND_ROOT:-/var/www/ptmm}"
+    fi
+fi
+
+if [[ "$MODE" == "public" ]]; then
+    case "$FRONTEND_ROOT" in
+        /*) ;;
+        *)
+            echo "Error: frontend static directory must be an absolute path."
+            exit 1
+            ;;
+    esac
+    if [[ "$FRONTEND_ROOT" == "/" ]]; then
+        echo "Error: frontend static directory cannot be /."
+        exit 1
+    fi
 fi
 
 # Step 4: Build frontend
@@ -180,6 +201,13 @@ echo "[4/4] Installing system services..."
 if [[ "$MODE" == "public" ]]; then
     UV_BIN="$(command -v uv)"
 
+    echo "Publishing frontend to $FRONTEND_ROOT..."
+    sudo mkdir -p "$FRONTEND_ROOT"
+    sudo find "$FRONTEND_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    sudo cp -a "$PROJECT_ROOT/frontend/dist/." "$FRONTEND_ROOT/"
+    sudo chown -R root:root "$FRONTEND_ROOT"
+    sudo chmod -R a+rX "$FRONTEND_ROOT"
+
     sed \
         -e "s|\${DEPLOY_USER}|$DEPLOY_USER|g" \
         -e "s|\${PROJECT_ROOT}|$PROJECT_ROOT|g" \
@@ -193,20 +221,25 @@ if [[ "$MODE" == "public" ]]; then
     sudo systemctl restart ptmm
     echo "Backend service started."
 
-    sed -i \
+    sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+    sed \
         -e "s|\${DOMAIN}|$DOMAIN|g" \
-        -e "s|\${PROJECT_ROOT}|$PROJECT_ROOT|g" \
+        -e "s|\${FRONTEND_ROOT}|$FRONTEND_ROOT|g" \
         -e "s|\${SSL_CERT}|$SSL_CERT|g" \
         -e "s|\${SSL_KEY}|$SSL_KEY|g" \
         -e "s|\${HTTPS_PORT}|$HTTPS_PORT|g" \
         -e "s|\${BACKEND_PORT}|$BACKEND_PORT|g" \
-        "$PROJECT_ROOT/nginx/ptmm.conf"
-    echo "Nginx config written to: $PROJECT_ROOT/nginx/ptmm.conf"
+        < "$PROJECT_ROOT/nginx/ptmm.conf" \
+        | sudo tee /etc/nginx/sites-available/ptmm > /dev/null
+    sudo ln -sf /etc/nginx/sites-available/ptmm /etc/nginx/sites-enabled/ptmm
+    if ! sudo nginx -t; then
+        echo "Error: nginx config test failed."
+        exit 1
+    fi
+    sudo systemctl reload nginx
+    echo "Nginx config installed."
     echo ""
-    echo "To install with nginx on Debian/Ubuntu:"
-    echo "  sudo cp $PROJECT_ROOT/nginx/ptmm.conf /etc/nginx/sites-available/ptmm"
-    echo "  sudo ln -sf /etc/nginx/sites-available/ptmm /etc/nginx/sites-enabled/ptmm"
-    echo "  sudo nginx -t && sudo systemctl reload nginx"
+    echo "Frontend files served from: $FRONTEND_ROOT"
 else
     echo "Local mode, skipping systemd and nginx."
 fi
@@ -221,6 +254,7 @@ fi
         echo "DEPLOY_USER=$DEPLOY_USER"
         echo "HTTPS_PORT=$HTTPS_PORT"
         echo "BACKEND_PORT=$BACKEND_PORT"
+        echo "FRONTEND_ROOT=$FRONTEND_ROOT"
         echo "SSL_CERT=$SSL_CERT"
         echo "SSL_KEY=$SSL_KEY"
         echo "AUTH_USERNAME=$AUTH_USERNAME"

@@ -39,6 +39,22 @@ if [[ "$MODE" == "public" ]]; then
         sudo systemctl reload nginx
     fi
     echo "Nginx config removed."
+
+    FRONTEND_ROOT="${FRONTEND_ROOT:-}"
+    if [[ -n "$FRONTEND_ROOT" ]]; then
+        echo ""
+        read -r -p "Remove deployed frontend files at $FRONTEND_ROOT? [y/N] " remove_frontend
+        if [[ "$remove_frontend" == "y" || "$remove_frontend" == "Y" ]]; then
+            if [[ "$FRONTEND_ROOT" == "/" ]]; then
+                echo "Refusing to remove /."
+            else
+                sudo rm -rf "$FRONTEND_ROOT"
+                echo "Frontend files removed."
+            fi
+        else
+            echo "Frontend files kept at $FRONTEND_ROOT."
+        fi
+    fi
 fi
 
 #  Remove state file 
