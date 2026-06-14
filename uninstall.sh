@@ -4,6 +4,18 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 STATE_FILE="$PROJECT_ROOT/.ptmm-install"
 
+load_state() {
+    local line key value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+        key="${line%%=*}"
+        value="${line#*=}"
+        if [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+            printf -v "$key" '%s' "$value"
+        fi
+    done < "$STATE_FILE"
+}
+
 echo "Uninstalling PT Media Manager..."
 read -r -p "This will stop services and remove system configs. Continue? [y/N] " confirm
 if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
@@ -15,7 +27,7 @@ fi
 
 MODE="public"  # safe default: try to remove everything
 if [[ -f "$STATE_FILE" ]]; then
-    source "$STATE_FILE"
+    load_state
 else
     echo "Warning: .ptmm-install not found, assuming public mode."
 fi
