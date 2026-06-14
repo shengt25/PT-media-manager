@@ -8,13 +8,17 @@ Run with --dry-run to preview without writing anything.
 
 import argparse
 import json
+import os
 import shutil
 import sqlite3
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 DEFAULT_DB = Path("~/.config/ptmm/ptmm.db").expanduser()
+DEFAULT_BACKEND_ENV = Path(__file__).resolve().parents[1] / "backend" / ".env"
 
 MEDIA_TYPE_MAP = {
     "Series":    "tv",
@@ -24,6 +28,7 @@ MEDIA_TYPE_MAP = {
 }
 
 ARTWORK_EXT = {".nfo", ".jpg", ".png"}
+TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w185"
 
 
 def _read_tmdb_id(nfo_path: Path) -> int:
@@ -46,6 +51,92 @@ def _collect_generated(media_dir: Path) -> list[str]:
         str(p) for p in sorted(media_dir.rglob("*"))
         if p.is_file() and p.suffix.lower() in ARTWORK_EXT
     ]
+
+
+def _find_poster_path(generated: list[str]) -> str | None:
+    return next((p for p in generated if Path(p).name.endswith("poster.jpg")), None)
+
+
+def _infer_thumb_path(poster_path: str) -> Path:
+    return Path(poster_path).with_name(".ptmm-thumb.jpg")
+
+
+def _open_url(request_or_url, proxy: str | None = None, timeout: int = 30):
+    if proxy:
+        opener = build_opener(ProxyHandler({"http": proxy, "https": proxy}))
+        return opener.open(request_or_url, timeout=timeout)
+    return urlopen(request_or_url, timeout=timeout)
+
+
+def _fetch_tmdb_poster_path(tmdb_id: int, media_type: str, api_key: str, proxy: str | None = None) -> str | None:
+    endpoint = "movie" if media_type == "movie" else "tv"
+    request = Request(
+        f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    with _open_url(request, proxy, timeout=20) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    return data.get("poster_path")
+
+
+def _download_thumb(thumb_path: Path, poster_path: str, proxy: str | None = None) -> bool:
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+    with _open_url(f"{TMDB_IMAGE_BASE}{poster_path}", proxy, timeout=30) as response:
+        thumb_path.write_bytes(response.read())
+    return True
+
+
+def _read_env_value(path: Path, key: str) -> str | None:
+    if not path.exists():
+        return None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, value = line.split("=", 1)
+        if k == key:
+            return value
+    return None
+
+
+def _resolve_tmdb_api_key(explicit_key: str | None) -> str | None:
+    return explicit_key or os.environ.get("TMDB_API_KEY") or _read_env_value(DEFAULT_BACKEND_ENV, "TMDB_API_KEY")
+
+
+def _resolve_tmdb_proxy(explicit_proxy: str | None) -> str | None:
+    return explicit_proxy or os.environ.get("TMDB_PROXY") or _read_env_value(DEFAULT_BACKEND_ENV, "TMDB_PROXY")
+
+
+def _ensure_poster_thumb(tmdb_id: int | None, media_type: str, generated_files: str | None, api_key: str | None, proxy: str | None) -> tuple[str | None, str | None]:
+    if not generated_files:
+        return generated_files, None
+    try:
+        generated = json.loads(generated_files)
+    except (json.JSONDecodeError, TypeError):
+        return generated_files, "generated_files is not valid JSON"
+
+    existing_thumb = next((p for p in generated if Path(p).name.endswith(".ptmm-thumb.jpg")), None)
+    if existing_thumb and Path(existing_thumb).exists():
+        return generated_files, None
+
+    poster_path = _find_poster_path(generated)
+    if not poster_path:
+        return generated_files, "poster.jpg not found, thumbnail skipped"
+    if tmdb_id is None:
+        return generated_files, "tmdb_id missing, thumbnail skipped"
+    if not api_key:
+        return generated_files, "TMDB API key missing, thumbnail skipped"
+
+    thumb_path = _infer_thumb_path(poster_path)
+    try:
+        remote_poster_path = _fetch_tmdb_poster_path(tmdb_id, media_type, api_key, proxy)
+        if not remote_poster_path:
+            return generated_files, "TMDB poster_path missing, thumbnail skipped"
+        _download_thumb(thumb_path, remote_poster_path, proxy)
+    except (OSError, URLError, TimeoutError, json.JSONDecodeError) as e:
+        return generated_files, f"thumbnail download failed: {e}"
+
+    generated.append(str(thumb_path))
+    return json.dumps(generated), None
 
 
 def _calc_size(media_dir: Path) -> int | None:
@@ -79,12 +170,14 @@ def _scan_media(source_name: str, link_path: str, media_type: str) -> tuple[str,
     return "confirmed", tmdb_id, json.dumps(generated), size, None
 
 
-def migrate(old_db: Path, dry_run: bool = False):
+def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None, tmdb_proxy: str | None = None):
     if not old_db.exists():
         print(f"Error: old database not found: {old_db}")
         sys.exit(1)
 
     old = sqlite3.connect(old_db)
+    tmdb_api_key = _resolve_tmdb_api_key(tmdb_api_key)
+    tmdb_proxy = _resolve_tmdb_proxy(tmdb_proxy)
 
     entries = old.execute(
         "SELECT entry_name, source_path, link_path FROM entry_path"
@@ -96,6 +189,12 @@ def migrate(old_db: Path, dry_run: bool = False):
     warnings = []
 
     if dry_run:
+        if tmdb_api_key:
+            print("TMDB API key found; confirmed items can download PTMM thumbnails during migration.")
+        else:
+            print("TMDB API key not found; confirmed items will migrate without PTMM thumbnails.")
+        if tmdb_proxy:
+            print(f"TMDB proxy configured: {tmdb_proxy}")
         for entry_name, source_path, link_path in entries:
             media_type = MEDIA_TYPE_MAP.get(entry_name, "movie")
             media_rows = old.execute(
@@ -153,6 +252,10 @@ def migrate(old_db: Path, dry_run: bool = False):
             status, tmdb_id, generated_files, size, warn = _scan_media(media_name, link_path, media_type)
             if warn:
                 warnings.append(f"{entry_name}/{media_name}: {warn}")
+            if status == "confirmed":
+                generated_files, thumb_warn = _ensure_poster_thumb(tmdb_id, media_type, generated_files, tmdb_api_key, tmdb_proxy)
+                if thumb_warn:
+                    warnings.append(f"{entry_name}/{media_name}: {thumb_warn}")
             new.execute(
                 "INSERT INTO media (entry_id, source_name, date_added, scrape_status, tmdb_id, generated_files, size)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -206,6 +309,10 @@ def main():
                         help=f"Path to database (default: {DEFAULT_DB})")
     parser.add_argument("--dry-run", action="store_true",
                         help="Preview what would be migrated without writing anything")
+    parser.add_argument("--tmdb-api-key",
+                        help="TMDB API key for downloading PTMM thumbnails during migration")
+    parser.add_argument("--tmdb-proxy",
+                        help="HTTP/HTTPS proxy for TMDB requests, e.g. http://127.0.0.1:7890")
     args = parser.parse_args()
 
     if not args.db.exists():
@@ -213,7 +320,7 @@ def main():
         print("Use --db to specify the path.")
         sys.exit(1)
 
-    migrate(args.db, dry_run=args.dry_run)
+    migrate(args.db, dry_run=args.dry_run, tmdb_api_key=args.tmdb_api_key, tmdb_proxy=args.tmdb_proxy)
 
 
 if __name__ == "__main__":

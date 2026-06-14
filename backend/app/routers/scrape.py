@@ -5,7 +5,7 @@ from sqlmodel import Session
 from pydantic import BaseModel
 from app.db.database import get_session
 from app.db import crud
-from app.core.scraper import search_tmdb, fetch_tmdb_detail, download_artwork, generate_episode_nfos
+from app.core.scraper import search_tmdb, fetch_tmdb_detail, download_artwork, download_poster_thumbnail, generate_episode_nfos
 from app.core.nfo import write_movie_nfo, write_tvshow_nfo
 from app.core.scanner import find_main_video_stem
 
@@ -42,6 +42,12 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
             filename_prefix=prefix,
             proxy=proxy,
         )
+        thumb_path = download_poster_thumbnail(
+            entry.link_path,
+            media.source_name,
+            tmdb_data.get("poster_path"),
+            proxy=proxy,
+        )
         nfo_path = write_movie_nfo(entry.link_path, media.source_name, video_stem, tmdb_data)
         generated.append(nfo_path)
     else:
@@ -51,6 +57,12 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
             tmdb_data.get("backdrop_path"),
             proxy=proxy,
         )
+        thumb_path = download_poster_thumbnail(
+            entry.link_path,
+            media.source_name,
+            tmdb_data.get("poster_path"),
+            proxy=proxy,
+        )
         nfo_path = write_tvshow_nfo(entry.link_path, media.source_name, tmdb_data)
         generated.append(nfo_path)
         episode_nfos = generate_episode_nfos(entry.link_path, media.source_name, tmdb_id, language, proxy)
@@ -58,6 +70,10 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
 
     media.tmdb_id = tmdb_id
     media.scrape_status = "confirmed"
+    if thumb_path:
+        generated.append(thumb_path)
+    elif tmdb_data.get("poster_path"):
+        raise HTTPException(502, "Poster thumbnail download failed")
     media.generated_files = json.dumps(generated)
     return crud.media_update(session, media)
 

@@ -7,6 +7,7 @@ from app.core.scanner import VIDEO_EXT
 
 TMDB_BASE = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original"
+TMDB_THUMB_IMAGE_BASE = "https://image.tmdb.org/t/p/w185"
 
 
 
@@ -103,6 +104,25 @@ def download_artwork(link_path: str, name: str, poster_path: str | None, backdro
                 p.write_bytes(r.content)
                 generated.append(str(p))
     return generated
+
+
+def get_poster_thumb_path(link_path: str, name: str) -> Path:
+    return Path(link_path) / name / ".ptmm-thumb.jpg"
+
+
+def download_poster_thumbnail(link_path: str, name: str, poster_path: str | None, proxy: str | None = None) -> str | None:
+    if not poster_path:
+        return None
+    thumb_path = get_poster_thumb_path(link_path, name)
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+    with httpx.Client(proxy=proxy) as client:
+        r = client.get(f"{TMDB_THUMB_IMAGE_BASE}{poster_path}")
+        if r.status_code != 200:
+            return None
+        thumb_path.write_bytes(r.content)
+    if not thumb_path.exists():
+        return None
+    return str(thumb_path)
 
 
 def fetch_tmdb_episode(tmdb_id: int, season: int, episode: int, language: str = "zh-CN", proxy: str | None = None) -> dict:

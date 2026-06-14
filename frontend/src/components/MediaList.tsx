@@ -38,7 +38,7 @@ function MediaRow({ media, selected, onClick }: { media: Media; selected: boolea
     >
       {!posterError ? (
         <img
-          src={`${API_BASE}/media/${media.id}/poster`}
+          src={`${API_BASE}/media/${media.id}/thumb`}
           alt=""
           className="w-7 h-10 object-cover rounded shrink-0"
           onError={() => setPosterError(true)}

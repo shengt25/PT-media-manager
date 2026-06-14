@@ -42,6 +42,22 @@ def get_poster(media_id: int, session: Session = Depends(get_session)):
     return FileResponse(poster_path, media_type="image/jpeg")
 
 
+@router.get("/{media_id}/thumb")
+def get_thumb(media_id: int, session: Session = Depends(get_session)):
+    media = crud.media_get(session, media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    if media.generated_files:
+        try:
+            paths = json.loads(media.generated_files)
+        except (json.JSONDecodeError, TypeError):
+            paths = []
+        thumb_path = next((p for p in paths if Path(p).name.endswith(".ptmm-thumb.jpg")), None)
+        if thumb_path and Path(thumb_path).exists():
+            return FileResponse(thumb_path, media_type="image/jpeg")
+    raise HTTPException(404, "Thumbnail not found")
+
+
 @router.get("/{media_id}/episodes")
 def list_episodes(media_id: int, session: Session = Depends(get_session)):
     media = crud.media_get(session, media_id)
