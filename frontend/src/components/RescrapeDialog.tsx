@@ -24,6 +24,9 @@ export function RescrapeDialog({ open, media, entry, onClose, onFullRescrape, on
     try {
       const result = await syncEpisodes(media.id)
       toast.success(`Added ${result.added} episode NFO${result.added !== 1 ? 's' : ''}`)
+      for (const warning of result.warnings) {
+        toast.warning(warning)
+      }
       onSynced()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e))
@@ -34,6 +37,7 @@ export function RescrapeDialog({ open, media, entry, onClose, onFullRescrape, on
 
   if (!media || !entry) return null
   const isTV = entry.media_type === 'tv'
+  const canSync = isTV && media.scrape_status === 'partial'
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
@@ -43,18 +47,20 @@ export function RescrapeDialog({ open, media, entry, onClose, onFullRescrape, on
         </DialogHeader>
         <div className="text-sm text-muted-foreground py-2">
           {isTV
-            ? 'Choose how to re-scrape this TV show.'
+            ? canSync
+              ? 'Choose how to update this TV show.'
+              : 'This will delete all generated files and re-scrape.'
             : 'This will delete all generated files and re-scrape.'}
         </div>
         <DialogFooter className="flex-col gap-2 sm:flex-col">
-          {isTV && (
+          {canSync && (
             <Button
               variant="outline"
               className="w-full justify-start"
               disabled={syncing}
               onClick={handleSync}
             >
-              {syncing ? 'Syncing…' : 'Sync new episodes'}
+              {syncing ? 'Scraping…' : 'Incremental scrape'}
               <span className="ml-auto text-xs text-muted-foreground">incremental</span>
             </Button>
           )}

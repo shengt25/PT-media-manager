@@ -300,9 +300,19 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
                 if thumb_warn:
                     warnings.append(f"{entry_name}/{media_name}: {thumb_warn}")
             new.execute(
-                "INSERT INTO media (entry_id, source_name, date_added, scrape_status, tmdb_id, generated_files, size)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (entry_id, source_name, date, status, tmdb_id, generated_files, size),
+                "INSERT INTO media (entry_id, source_name, date_added, scrape_status, tmdb_id, generated_files, size, scrape_language, image_language)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    entry_id,
+                    source_name,
+                    date,
+                    status,
+                    tmdb_id,
+                    generated_files,
+                    size,
+                    "zh-CN" if status == "confirmed" else None,
+                    "zh-CN" if status == "confirmed" else None,
+                ),
             )
             if status == "confirmed":
                 confirmed += 1
@@ -338,10 +348,13 @@ def _create_schema(conn: sqlite3.Connection):
             entry_id        INTEGER NOT NULL REFERENCES entry(id),
             source_name     TEXT    NOT NULL,
             date_added      TEXT    NOT NULL,
-            scrape_status   TEXT    NOT NULL DEFAULT 'pending',
+            scrape_status   TEXT    NOT NULL DEFAULT 'pending'
+                CHECK (scrape_status IN ('pending', 'confirmed', 'partial')),
             tmdb_id         INTEGER,
             generated_files TEXT,
-            size            INTEGER
+            size            INTEGER,
+            scrape_language TEXT,
+            image_language  TEXT
         );
     """)
 

@@ -5,10 +5,12 @@ export interface Media {
   entry_id: number
   source_name: string
   date_added: string
-  scrape_status: 'pending' | 'confirmed' | 'skipped'
+  scrape_status: 'pending' | 'confirmed' | 'partial'
   tmdb_id: number | null
   generated_files: string | null
   size: number | null
+  scrape_language: string | null
+  image_language: string | null
   metadata?: Record<string, string>
 }
 

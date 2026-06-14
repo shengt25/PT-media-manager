@@ -61,13 +61,15 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
             )
             nfo_path = write_tvshow_nfo(entry.link_path, media.source_name, tmdb_data)
             generated.append(nfo_path)
-            episode_nfos = generate_episode_nfos(entry.link_path, media.source_name, tmdb_id, language, proxy)
-            generated.extend(episode_nfos)
+            episode_result = generate_episode_nfos(entry.link_path, media.source_name, tmdb_id, language, proxy)
+            generated.extend(episode_result.generated)
     except ArtworkDownloadError as e:
         raise HTTPException(502, str(e))
 
     media.tmdb_id = tmdb_id
     media.scrape_status = "confirmed"
+    media.scrape_language = language
+    media.image_language = image_language or language
     if thumb_path:
         generated.append(thumb_path)
     elif tmdb_data.get("poster_path"):
@@ -130,23 +132,26 @@ def sync_episodes(media_id: int, session: Session = Depends(get_session)):
     media = crud.media_get(session, media_id)
     if not media:
         raise HTTPException(404, "Media not found")
-    if media.scrape_status != "confirmed":
-        raise HTTPException(400, "Media is not confirmed")
+    if media.scrape_status != "partial":
+        raise HTTPException(400, "Media is not partial")
     entry = crud.entry_get(session, media.entry_id)
     if entry.media_type != "tv":
         raise HTTPException(400, "Not a TV entry")
+    if not media.tmdb_id:
+        raise HTTPException(400, "Media has no TMDB id")
+    if not media.scrape_language:
+        raise HTTPException(400, "Media has no saved scrape language. Run Full re-scrape first.")
     proxy = crud.get_app_settings(session).tmdb_proxy
-    new_nfos = generate_episode_nfos(entry.link_path, media.source_name, media.tmdb_id, proxy=proxy)
+    episode_result = generate_episode_nfos(
+        entry.link_path,
+        media.source_name,
+        media.tmdb_id,
+        media.scrape_language,
+        proxy,
+    )
     existing = json.loads(media.generated_files) if media.generated_files else []
-    media.generated_files = json.dumps(existing + new_nfos)
+    media.generated_files = json.dumps(existing + episode_result.generated)
+    media.scrape_status = "confirmed"
     crud.media_update(session, media)
-    return {"added": len(new_nfos)}
-
-
-@router.post("/{media_id}/skip", status_code=204)
-def skip(media_id: int, session: Session = Depends(get_session)):
-    media = crud.media_get(session, media_id)
-    if not media:
-        raise HTTPException(404, "Media not found")
-    media.scrape_status = "skipped"
-    crud.media_update(session, media)
+    added_nfos = len([path for path in episode_result.generated if path.endswith(".nfo")])
+    return {"added": added_nfos, "generated": len(episode_result.generated), "warnings": episode_result.warnings}

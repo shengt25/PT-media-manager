@@ -4,7 +4,6 @@ import { listEntries, type Entry } from '@/api/entries'
 import { listMedia, type Media } from '@/api/media'
 import { runScan, type ScanResultItem } from '@/api/scan'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { ScanQueue } from '@/components/ScanQueue'
 import { MediaList } from '@/components/MediaList'
 import { DetailPanel } from '@/components/DetailPanel'
@@ -63,7 +62,7 @@ export function Library() {
       if (autoRemovedEntries.length > 0) {
         await Promise.all([...new Set(autoRemovedEntries)].map(id => refreshMedia(id)))
       }
-      const withDiff = results.filter(r => r.added.length > 0 || r.removed.length > 0)
+      const withDiff = results.filter(r => r.added.length > 0 || r.removed.length > 0 || r.episode_updates.length > 0)
       setScanResults(withDiff)
       if (withDiff.length === 0 && results.every(r => r.auto_removed.length === 0)) {
         toast('No changes detected')
@@ -78,7 +77,7 @@ export function Library() {
   function handleConfirmedAdd(entryId: number, sourcePath: string) {
     setScanResults(prev =>
       prev.map(r => r.entry_id === entryId ? { ...r, added: r.added.filter(n => n.source_path !== sourcePath) } : r)
-          .filter(r => r.added.length > 0 || r.removed.length > 0)
+          .filter(r => r.added.length > 0 || r.removed.length > 0 || r.episode_updates.length > 0)
     )
     refreshMedia(entryId)
   }
@@ -86,7 +85,15 @@ export function Library() {
   function handleConfirmedRemove(entryId: number, mediaId: number) {
     setScanResults(prev =>
       prev.map(r => r.entry_id === entryId ? { ...r, removed: r.removed.filter(m => m.id !== mediaId) } : r)
-          .filter(r => r.added.length > 0 || r.removed.length > 0)
+          .filter(r => r.added.length > 0 || r.removed.length > 0 || r.episode_updates.length > 0)
+    )
+    refreshMedia(entryId)
+  }
+
+  function handleConfirmedEpisodeUpdates(entryId: number, mediaId: number) {
+    setScanResults(prev =>
+      prev.map(r => r.entry_id === entryId ? { ...r, episode_updates: r.episode_updates.filter(u => u.media_id !== mediaId) } : r)
+          .filter(r => r.added.length > 0 || r.removed.length > 0 || r.episode_updates.length > 0)
     )
     refreshMedia(entryId)
   }
@@ -114,11 +121,12 @@ export function Library() {
           results={scanResults}
           onConfirmedAdd={handleConfirmedAdd}
           onConfirmedRemove={handleConfirmedRemove}
+          onConfirmedEpisodeUpdates={handleConfirmedEpisodeUpdates}
         />
       )}
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-64 shrink-0 border-r overflow-hidden flex flex-col">
+      <div className="flex flex-1 min-h-0 overflow-hidden max-lg:flex-col">
+        <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
           {loading ? (
             <p className="p-4 text-sm text-muted-foreground">Loading…</p>
           ) : (
@@ -130,8 +138,6 @@ export function Library() {
             />
           )}
         </div>
-
-        <Separator orientation="vertical" />
 
         <DetailPanel
           media={selectedMedia}

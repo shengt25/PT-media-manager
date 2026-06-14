@@ -29,7 +29,7 @@ def list_media(entry_id: int, session: Session = Depends(get_session)):
     result = []
     for m in media_list:
         item = m.model_dump()
-        if m.scrape_status == "confirmed":
+        if m.scrape_status in {"confirmed", "partial"}:
             item["metadata"] = read_nfo(m.generated_files, entry.media_type)
         result.append(item)
     return result
@@ -60,7 +60,7 @@ def list_episodes(media_id: int, session: Session = Depends(get_session)):
     media = crud.media_get(session, media_id)
     if not media:
         raise HTTPException(404, "Media not found")
-    if media.scrape_status != "confirmed":
+    if media.scrape_status not in {"confirmed", "partial"}:
         raise HTTPException(400, "Media is not confirmed")
     entry = crud.entry_get(session, media.entry_id)
     if entry.media_type != "tv":

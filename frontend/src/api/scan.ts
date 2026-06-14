@@ -9,6 +9,7 @@ export interface ScanResultItem {
   entry_name: string
   added: ScanAddItem[]
   removed: { id: number; source_name: string }[]
+  episode_updates: { media_id: number; source_name: string; files: string[] }[]
   auto_removed: string[]
   notes: string[]
 }
@@ -25,4 +26,10 @@ export const confirmRemove = (mediaId: number) =>
   apiFetch<void>('/scan/confirm-remove', {
     method: 'POST',
     body: JSON.stringify({ media_id: mediaId }),
+  })
+
+export const confirmEpisodeUpdates = (mediaId: number, files: string[]) =>
+  apiFetch<{ linked: number; existing: number }>('/scan/confirm-episode-updates', {
+    method: 'POST',
+    body: JSON.stringify({ media_id: mediaId, files }),
   })

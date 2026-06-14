@@ -31,8 +31,5 @@ export const rescrape = (mediaId: number, tmdbId: number, language = 'zh-CN', im
     body: JSON.stringify({ tmdb_id: tmdbId, language, image_language: imageLanguage }),
   })
 
-export const skipScrape = (mediaId: number) =>
-  apiFetch<void>(`/scrape/${mediaId}/skip`, { method: 'POST' })
-
 export const syncEpisodes = (mediaId: number) =>
-  apiFetch<{ added: number }>(`/scrape/${mediaId}/sync-episodes`, { method: 'POST' })
+  apiFetch<{ added: number; generated: number; warnings: string[] }>(`/scrape/${mediaId}/sync-episodes`, { method: 'POST' })

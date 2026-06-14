@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
-import { toast } from 'sonner'
 import { type Media, type Episode, listEpisodes } from '@/api/media'
 import { type Entry } from '@/api/entries'
-import { skipScrape } from '@/api/scrape'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -70,17 +68,13 @@ export function DetailPanel({ media, entry, onRefresh }: Props) {
   const [scrapeMode, setScrapeMode] = useState<'confirm' | 'rescrape'>('confirm')
   const [rescrapeOpen, setRescrapeOpen] = useState(false)
   const [episodeKey, setEpisodeKey] = useState(0)
-  const [posterError, setPosterError] = useState(false)
-
-  useEffect(() => {
-    setPosterError(false)
-  }, [media?.id])
+  const [posterErrorMediaId, setPosterErrorMediaId] = useState<number | null>(null)
 
   if (!media || !entry) {
     return (
-      <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
+      <aside className="w-96 shrink-0 border-l p-5 text-muted-foreground text-sm max-lg:h-56 max-lg:w-full max-lg:border-l-0 max-lg:border-t">
         Select a media item from the list.
-      </div>
+      </aside>
     )
   }
 
@@ -88,19 +82,12 @@ export function DetailPanel({ media, entry, onRefresh }: Props) {
   const displayName = media.source_name
   const isTV = entry.media_type === 'tv'
   const isConfirmed = media.scrape_status === 'confirmed'
-
-  async function handleSkip() {
-    try {
-      await skipScrape(media!.id)
-      toast('Skipped')
-      onRefresh()
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    }
-  }
+  const isPartial = media.scrape_status === 'partial'
+  const isScraped = isConfirmed || isPartial
+  const posterError = posterErrorMediaId === media.id
 
   function handleRescrapeClick() {
-    if (isTV && isConfirmed) {
+    if (isTV && isScraped) {
       setRescrapeOpen(true)
     } else {
       setScrapeOpen(true)
@@ -108,63 +95,43 @@ export function DetailPanel({ media, entry, onRefresh }: Props) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      {isConfirmed && metadata ? (
-        <div className="flex gap-6">
-          <div className="shrink-0">
+    <aside className="w-96 shrink-0 overflow-y-auto border-l p-5 max-lg:h-72 max-lg:w-full max-lg:border-l-0 max-lg:border-t">
+      {isScraped && metadata ? (
+        <div className="space-y-4">
+          <div className="flex gap-3">
             {!posterError ? (
               <img
-                src={`${API_BASE}/media/${media.id}/poster`}
+                src={`${API_BASE}/media/${media.id}/thumb`}
                 alt=""
-                className="w-36 rounded-lg shadow-md"
-                onError={() => setPosterError(true)}
+                className="w-24 rounded-md object-cover shadow-sm"
+                onError={() => setPosterErrorMediaId(media.id)}
               />
             ) : (
-              <div className="w-36 h-52 bg-muted rounded-lg" />
+              <div className="h-36 w-24 shrink-0 rounded-md bg-muted" />
             )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <h2 className="text-xl font-semibold leading-tight">
-              {metadata.title}
-              {metadata.year && <span className="text-muted-foreground font-normal ml-2">({metadata.year})</span>}
-            </h2>
-            {metadata.originaltitle && metadata.originaltitle !== metadata.title && (
-              <p className="text-sm text-muted-foreground mt-0.5">{metadata.originaltitle}</p>
-            )}
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              {metadata.rating && (
-                <Badge variant="secondary">★ {parseFloat(metadata.rating).toFixed(1)}</Badge>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-semibold leading-tight">
+                {metadata.title}
+                {metadata.year && <span className="text-muted-foreground font-normal ml-2">({metadata.year})</span>}
+              </h2>
+              {metadata.originaltitle && metadata.originaltitle !== metadata.title && (
+                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{metadata.originaltitle}</p>
               )}
-              <Badge variant="outline" className="capitalize">{entry.media_type}</Badge>
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                {metadata.rating && (
+                  <Badge variant="secondary">★ {parseFloat(metadata.rating).toFixed(1)}</Badge>
+                )}
+                <Badge variant="outline" className="capitalize">{entry.media_type}</Badge>
+                {isPartial && <Badge variant="outline">Partial</Badge>}
+              </div>
             </div>
-            {metadata.plot && (
-              <p className="text-sm text-muted-foreground mt-3 leading-relaxed">{metadata.plot}</p>
-            )}
-            <div className="mt-4 pt-4 border-t space-y-1">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Details</p>
-              <p className="text-xs font-mono text-foreground">{displayName}</p>
-              {media.size != null && (
-                <p className="text-xs text-muted-foreground">
-                  {media.size >= 1e9
-                    ? `${(media.size / 1e9).toFixed(1)} GB`
-                    : `${(media.size / 1e6).toFixed(1)} MB`}
-                </p>
-              )}
-              <p className="text-xs text-muted-foreground">Added {media.date_added.slice(0, 10)}</p>
-            </div>
-            <Button size="sm" variant="outline" className="mt-3" onClick={handleRescrapeClick}>
-              Re-scrape
-            </Button>
-
-            {isTV && <EpisodeList key={episodeKey} mediaId={media.id} />}
           </div>
-        </div>
-      ) : (
-        <div>
-          <p className="text-sm text-muted-foreground mb-3">{entry.name} · {entry.media_type}</p>
-          <div className="space-y-1">
+          {metadata.plot && (
+            <p className="line-clamp-6 text-sm leading-relaxed text-muted-foreground">{metadata.plot}</p>
+          )}
+          <div className="mt-4 pt-4 border-t space-y-1">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Details</p>
-            <p className="text-xs font-mono text-foreground">{displayName}</p>
+            <p className="break-words text-xs font-mono text-foreground">{displayName}</p>
             {media.size != null && (
               <p className="text-xs text-muted-foreground">
                 {media.size >= 1e9
@@ -174,14 +141,31 @@ export function DetailPanel({ media, entry, onRefresh }: Props) {
             )}
             <p className="text-xs text-muted-foreground">Added {media.date_added.slice(0, 10)}</p>
           </div>
-          {media.scrape_status === 'skipped' && (
-            <Badge variant="outline" className="mt-3">Skipped</Badge>
-          )}
+          <div className="flex gap-2 mt-3">
+            <Button size="sm" variant="outline" onClick={handleRescrapeClick}>
+              {isPartial ? 'Scrape updates' : 'Re-scrape'}
+            </Button>
+          </div>
+
+          {isTV && <EpisodeList key={episodeKey} mediaId={media.id} />}
+        </div>
+      ) : (
+        <div>
+          <p className="text-sm text-muted-foreground mb-3">{entry.name} · {entry.media_type}</p>
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Details</p>
+            <p className="break-words text-xs font-mono text-foreground">{displayName}</p>
+            {media.size != null && (
+              <p className="text-xs text-muted-foreground">
+                {media.size >= 1e9
+                  ? `${(media.size / 1e9).toFixed(1)} GB`
+                  : `${(media.size / 1e6).toFixed(1)} MB`}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">Added {media.date_added.slice(0, 10)}</p>
+          </div>
           <div className="flex gap-2 mt-6">
             <Button onClick={() => { setScrapeMode('confirm'); setScrapeOpen(true) }}>Scrape</Button>
-            {media.scrape_status !== 'skipped' && (
-              <Button variant="outline" onClick={handleSkip}>Skip</Button>
-            )}
           </div>
         </div>
       )}
@@ -203,6 +187,6 @@ export function DetailPanel({ media, entry, onRefresh }: Props) {
         onFullRescrape={() => { setRescrapeOpen(false); setScrapeMode('rescrape'); setScrapeOpen(true) }}
         onSynced={() => { setRescrapeOpen(false); setEpisodeKey(k => k + 1); onRefresh() }}
       />
-    </div>
+    </aside>
   )
 }

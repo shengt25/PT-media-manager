@@ -53,12 +53,20 @@ def find_main_video_stem(media_dir: Path) -> str | None:
 
 
 @dataclass
+class EpisodeUpdate:
+    media_id: int
+    source_name: str
+    files: list[str]
+
+
+@dataclass
 class ScanResult:
     entry_id: int
     entry_name: str
     added: list[dict]
     removed: list[Media]
     link_missing: list[Media]
+    episode_updates: list[EpisodeUpdate] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
 
@@ -113,6 +121,7 @@ def scan_entry(entry: Entry, existing_media: list[Media]) -> ScanResult:
 
     removed = []
     link_missing = []
+    episode_updates: list[EpisodeUpdate] = []
     for media in existing_media:
         if entry.media_type == "movie":
             source_gone = not _movie_source_exists(source, media.source_name)
@@ -130,5 +139,29 @@ def scan_entry(entry: Entry, existing_media: list[Media]) -> ScanResult:
             removed.append(media)
         elif link_gone:
             link_missing.append(media)
+        elif entry.media_type == "tv" and media.id is not None:
+            new_files = _find_new_episode_files(source / media.source_name, Path(entry.link_path) / media.source_name)
+            if new_files:
+                episode_updates.append(EpisodeUpdate(media.id, media.source_name, new_files))
 
-    return ScanResult(entry.id, entry.name, added, removed, link_missing, notes)
+    return ScanResult(entry.id, entry.name, added, removed, link_missing, episode_updates, notes)
+
+
+def _find_new_episode_files(source_root: Path, link_root: Path) -> list[str]:
+    if not source_root.exists() or not source_root.is_dir() or not link_root.exists():
+        return []
+
+    files: list[str] = []
+    for source_file in sorted(source_root.rglob("*")):
+        if not source_file.is_file():
+            continue
+        if source_file.name.startswith("."):
+            continue
+        if source_file.suffix.lower() not in VIDEO_EXT:
+            continue
+        if _is_incomplete(source_file):
+            continue
+        rel = source_file.relative_to(source_root)
+        if not (link_root / rel).exists():
+            files.append(str(rel))
+    return files
