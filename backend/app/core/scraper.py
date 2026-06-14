@@ -1,9 +1,8 @@
 import httpx
 from pathlib import Path
 from dataclasses import dataclass, field
-from guessit import guessit
 from app.config import settings
-from app.core.episodes import normalize_episode_filenames
+from app.core.episodes import infer_episode_numbers
 from app.core.nfo import write_episode_nfo
 from app.core.scanner import VIDEO_EXT
 
@@ -216,7 +215,7 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
         for video_file in base.rglob("*")
         if video_file.is_file() and video_file.suffix.lower() in VIDEO_EXT
     ]
-    video_files = normalize_episode_filenames(video_files, base)
+    episode_numbers = infer_episode_numbers(video_files, base)
     seasons: set[int] = set()
     with _client(proxy, timeout=30) as client:
         for video_file in sorted(video_files):
@@ -224,22 +223,13 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
             if nfo_path.exists():
                 continue
             rel = video_file.relative_to(base)
-            info = guessit(str(rel))
-            season = info.get("season")
-            episode = info.get("episode")
-            if episode is None:
+            numbers = episode_numbers.get(video_file)
+            if numbers is None:
                 path = write_episode_nfo(video_file, {"title": video_file.stem})
                 result.generated.append(path)
                 result.warnings.append(f"Could not parse episode number: {rel}")
                 continue
-            if isinstance(episode, list):
-                episode = episode[0]
-            if season is None:
-                season = 1
-            if isinstance(season, list):
-                season = season[0]
-            season = int(season)
-            episode = int(episode)
+            season, episode = numbers
             seasons.add(season)
             ep_data = fetch_tmdb_episode(tmdb_id, season, episode, language, proxy)
             path = write_episode_nfo(video_file, ep_data)

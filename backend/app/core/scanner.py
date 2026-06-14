@@ -151,6 +151,13 @@ def _find_new_episode_files(source_root: Path, link_root: Path) -> list[str]:
     if not source_root.exists() or not source_root.is_dir() or not link_root.exists():
         return []
 
+    link_inodes = {
+        (st.st_dev, st.st_ino)
+        for f in link_root.rglob("*")
+        if f.is_file() and f.suffix.lower() in VIDEO_EXT
+        for st in (f.stat(),)
+    }
+
     files: list[str] = []
     for source_file in sorted(source_root.rglob("*")):
         if not source_file.is_file():
@@ -161,7 +168,7 @@ def _find_new_episode_files(source_root: Path, link_root: Path) -> list[str]:
             continue
         if _is_incomplete(source_file):
             continue
-        rel = source_file.relative_to(source_root)
-        if not (link_root / rel).exists():
-            files.append(str(rel))
+        st = source_file.stat()
+        if (st.st_dev, st.st_ino) not in link_inodes:
+            files.append(str(source_file.relative_to(source_root)))
     return files
