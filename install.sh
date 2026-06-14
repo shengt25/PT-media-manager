@@ -22,6 +22,21 @@ is_deploy_mode() {
     [[ "$MODE" == "internal" || "$MODE" == "public" ]]
 }
 
+has_command() {
+    local name path
+    name="$1"
+    shift
+    if command -v "$name" &>/dev/null; then
+        return 0
+    fi
+    for path in "$@"; do
+        if [[ -x "$path" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Step 1: Reuse previous config?
 
 REUSE_CONFIG=false
@@ -88,10 +103,10 @@ if ! command -v npm &>/dev/null; then
 fi
 
 if is_deploy_mode; then
-    if ! command -v systemctl &>/dev/null; then
+    if ! has_command systemctl /bin/systemctl /usr/bin/systemctl; then
         MISSING_DEPS+=("systemctl")
     fi
-    if ! command -v nginx &>/dev/null; then
+    if ! has_command nginx /usr/sbin/nginx /sbin/nginx /usr/local/sbin/nginx; then
         MISSING_DEPS+=("nginx")
     fi
 fi
