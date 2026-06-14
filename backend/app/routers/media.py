@@ -3,11 +3,21 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlmodel import Session
-from app.db.database import get_session
+from app.db.database import engine, get_session
 from app.db import crud
 from app.core.nfo import read_nfo, read_episode_nfos
 
 router = APIRouter(prefix="/media", tags=["media"])
+
+
+def _get_generated_files(media_id: int) -> str:
+    with Session(engine) as session:
+        media = crud.media_get(session, media_id)
+        if not media:
+            raise HTTPException(404, "Media not found")
+        if not media.generated_files:
+            raise HTTPException(404, "Artwork not found")
+        return media.generated_files
 
 
 @router.get("/entry/{entry_id}")
@@ -26,14 +36,10 @@ def list_media(entry_id: int, session: Session = Depends(get_session)):
 
 
 @router.get("/{media_id}/poster")
-def get_poster(media_id: int, session: Session = Depends(get_session)):
-    media = crud.media_get(session, media_id)
-    if not media:
-        raise HTTPException(404, "Media not found")
-    if not media.generated_files:
-        raise HTTPException(404, "Poster not found")
+def get_poster(media_id: int):
+    generated_files = _get_generated_files(media_id)
     try:
-        paths = json.loads(media.generated_files)
+        paths = json.loads(generated_files)
     except (json.JSONDecodeError, TypeError):
         raise HTTPException(404, "Poster not found")
     poster_path = next((p for p in paths if p.endswith("poster.jpg")), None)
@@ -43,18 +49,15 @@ def get_poster(media_id: int, session: Session = Depends(get_session)):
 
 
 @router.get("/{media_id}/thumb")
-def get_thumb(media_id: int, session: Session = Depends(get_session)):
-    media = crud.media_get(session, media_id)
-    if not media:
-        raise HTTPException(404, "Media not found")
-    if media.generated_files:
-        try:
-            paths = json.loads(media.generated_files)
-        except (json.JSONDecodeError, TypeError):
-            paths = []
-        thumb_path = next((p for p in paths if Path(p).name.endswith(".ptmm-thumb.jpg")), None)
-        if thumb_path and Path(thumb_path).exists():
-            return FileResponse(thumb_path, media_type="image/jpeg")
+def get_thumb(media_id: int):
+    generated_files = _get_generated_files(media_id)
+    try:
+        paths = json.loads(generated_files)
+    except (json.JSONDecodeError, TypeError):
+        paths = []
+    thumb_path = next((p for p in paths if Path(p).name.endswith(".ptmm-thumb.jpg")), None)
+    if thumb_path and Path(thumb_path).exists():
+        return FileResponse(thumb_path, media_type="image/jpeg")
     raise HTTPException(404, "Thumbnail not found")
 
 
