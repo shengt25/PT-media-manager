@@ -18,10 +18,6 @@ load_state() {
 
 echo "PT Media Manager Installer"
 
-is_deploy_mode() {
-    [[ "$MODE" == "internal" || "$MODE" == "public" ]]
-}
-
 has_command() {
     local name path
     name="$1"
@@ -46,11 +42,9 @@ if [[ -f "$STATE_FILE" ]]; then
     echo ""
     echo "Found previous install config ($STATE_FILE):"
     echo "  Mode: $MODE"
-    if is_deploy_mode; then
-        echo "  Deploy user: ${DEPLOY_USER:-$(whoami)}"
-        echo "  Backend port: ${BACKEND_PORT:-8000}"
-        echo "  Frontend root: ${FRONTEND_ROOT:-/var/www/ptmm}"
-    fi
+    echo "  Deploy user: ${DEPLOY_USER:-$(whoami)}"
+    echo "  Backend port: ${BACKEND_PORT:-8000}"
+    echo "  Frontend root: ${FRONTEND_ROOT:-/var/www/ptmm}"
     if [[ "$MODE" == "internal" ]]; then
         echo "  HTTP port: ${HTTP_PORT:-8080}"
     fi
@@ -102,13 +96,11 @@ if ! command -v npm &>/dev/null; then
     MISSING_DEPS+=("npm  ->  https://nodejs.org/")
 fi
 
-if is_deploy_mode; then
-    if ! has_command systemctl /bin/systemctl /usr/bin/systemctl; then
-        MISSING_DEPS+=("systemctl")
-    fi
-    if ! has_command nginx /usr/sbin/nginx /sbin/nginx /usr/local/sbin/nginx; then
-        MISSING_DEPS+=("nginx")
-    fi
+if ! has_command systemctl /bin/systemctl /usr/bin/systemctl; then
+    MISSING_DEPS+=("systemctl")
+fi
+if ! has_command nginx /usr/sbin/nginx /sbin/nginx /usr/local/sbin/nginx; then
+    MISSING_DEPS+=("nginx")
 fi
 
 if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
@@ -146,16 +138,14 @@ if [[ "$REUSE_CONFIG" == false ]]; then
     AUTH_PASSWORD_HASH=""
     JWT_SECRET=""
 
-    if is_deploy_mode; then
-        read -rp "Deploy user (default: $(whoami)): " DEPLOY_USER
-        DEPLOY_USER="${DEPLOY_USER:-$(whoami)}"
+    read -rp "Deploy user (default: $(whoami)): " DEPLOY_USER
+    DEPLOY_USER="${DEPLOY_USER:-$(whoami)}"
 
-        read -rp "Backend port (default: 8000): " BACKEND_PORT
-        BACKEND_PORT="${BACKEND_PORT:-8000}"
+    read -rp "Backend port (default: 8000): " BACKEND_PORT
+    BACKEND_PORT="${BACKEND_PORT:-8000}"
 
-        read -rp "Frontend static directory (default: /var/www/ptmm): " FRONTEND_ROOT
-        FRONTEND_ROOT="${FRONTEND_ROOT:-/var/www/ptmm}"
-    fi
+    read -rp "Frontend static directory (default: /var/www/ptmm): " FRONTEND_ROOT
+    FRONTEND_ROOT="${FRONTEND_ROOT:-/var/www/ptmm}"
 
     if [[ "$MODE" == "internal" ]]; then
         read -rp "HTTP port (default: 8080): " HTTP_PORT
@@ -195,11 +185,9 @@ if [[ "$REUSE_CONFIG" == false ]]; then
 else
     echo ""
     echo "Reusing saved configuration."
-    if is_deploy_mode; then
-        DEPLOY_USER="${DEPLOY_USER:-$(whoami)}"
-        BACKEND_PORT="${BACKEND_PORT:-8000}"
-        FRONTEND_ROOT="${FRONTEND_ROOT:-/var/www/ptmm}"
-    fi
+    DEPLOY_USER="${DEPLOY_USER:-$(whoami)}"
+    BACKEND_PORT="${BACKEND_PORT:-8000}"
+    FRONTEND_ROOT="${FRONTEND_ROOT:-/var/www/ptmm}"
     if [[ "$MODE" == "internal" ]]; then
         HTTP_PORT="${HTTP_PORT:-8080}"
     fi
@@ -208,18 +196,16 @@ else
     fi
 fi
 
-if is_deploy_mode; then
-    case "$FRONTEND_ROOT" in
-        /*) ;;
-        *)
-            echo "Error: frontend static directory must be an absolute path."
-            exit 1
-            ;;
-    esac
-    if [[ "$FRONTEND_ROOT" == "/" ]]; then
-        echo "Error: frontend static directory cannot be /."
+case "$FRONTEND_ROOT" in
+    /*) ;;
+    *)
+        echo "Error: frontend static directory must be an absolute path."
         exit 1
-    fi
+        ;;
+esac
+if [[ "$FRONTEND_ROOT" == "/" ]]; then
+    echo "Error: frontend static directory cannot be /."
+    exit 1
 fi
 
 # Step 4: Build frontend
@@ -228,11 +214,7 @@ echo ""
 echo "[1/4] Building frontend..."
 cd "$PROJECT_ROOT/frontend"
 npm ci
-if is_deploy_mode; then
-    VITE_API_BASE=/api npm run build
-else
-    npm run build
-fi
+VITE_API_BASE=/api npm run build
 rm -rf node_modules
 echo "node_modules removed after build."
 
@@ -264,72 +246,65 @@ uv sync --no-dev --frozen --directory "$PROJECT_ROOT/backend"
 echo ""
 echo "[4/4] Installing system services..."
 
-if is_deploy_mode; then
-    UV_BIN="$(command -v uv)"
+UV_BIN="$(command -v uv)"
 
-    echo "Publishing frontend to $FRONTEND_ROOT..."
-    sudo mkdir -p "$FRONTEND_ROOT"
-    sudo find "$FRONTEND_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-    sudo cp -a "$PROJECT_ROOT/frontend/dist/." "$FRONTEND_ROOT/"
-    sudo chown -R root:root "$FRONTEND_ROOT"
-    sudo chmod -R a+rX "$FRONTEND_ROOT"
+echo "Publishing frontend to $FRONTEND_ROOT..."
+sudo mkdir -p "$FRONTEND_ROOT"
+sudo find "$FRONTEND_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+sudo cp -a "$PROJECT_ROOT/frontend/dist/." "$FRONTEND_ROOT/"
+sudo chown -R root:root "$FRONTEND_ROOT"
+sudo chmod -R a+rX "$FRONTEND_ROOT"
 
+sed \
+    -e "s|\${DEPLOY_USER}|$DEPLOY_USER|g" \
+    -e "s|\${PROJECT_ROOT}|$PROJECT_ROOT|g" \
+    -e "s|\${UV_PATH}|$UV_BIN|g" \
+    -e "s|\${BACKEND_PORT}|$BACKEND_PORT|g" \
+    < "$PROJECT_ROOT/systemd/ptmm.service" \
+    | sudo tee /etc/systemd/system/ptmm.service > /dev/null
+
+sudo systemctl daemon-reload
+sudo systemctl enable ptmm
+sudo systemctl restart ptmm
+echo "Backend service started."
+
+sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+if [[ "$MODE" == "public" ]]; then
     sed \
-        -e "s|\${DEPLOY_USER}|$DEPLOY_USER|g" \
-        -e "s|\${PROJECT_ROOT}|$PROJECT_ROOT|g" \
-        -e "s|\${UV_PATH}|$UV_BIN|g" \
+        -e "s|\${DOMAIN}|$DOMAIN|g" \
+        -e "s|\${FRONTEND_ROOT}|$FRONTEND_ROOT|g" \
+        -e "s|\${SSL_CERT}|$SSL_CERT|g" \
+        -e "s|\${SSL_KEY}|$SSL_KEY|g" \
+        -e "s|\${HTTPS_PORT}|$HTTPS_PORT|g" \
         -e "s|\${BACKEND_PORT}|$BACKEND_PORT|g" \
-        < "$PROJECT_ROOT/systemd/ptmm.service" \
-        | sudo tee /etc/systemd/system/ptmm.service > /dev/null
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable ptmm
-    sudo systemctl restart ptmm
-    echo "Backend service started."
-
-    sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-    if [[ "$MODE" == "public" ]]; then
-        sed \
-            -e "s|\${DOMAIN}|$DOMAIN|g" \
-            -e "s|\${FRONTEND_ROOT}|$FRONTEND_ROOT|g" \
-            -e "s|\${SSL_CERT}|$SSL_CERT|g" \
-            -e "s|\${SSL_KEY}|$SSL_KEY|g" \
-            -e "s|\${HTTPS_PORT}|$HTTPS_PORT|g" \
-            -e "s|\${BACKEND_PORT}|$BACKEND_PORT|g" \
-            < "$PROJECT_ROOT/nginx/ptmm.conf" \
-            | sudo tee /etc/nginx/sites-available/ptmm > /dev/null
-    else
-        sed \
-            -e "s|\${HTTP_PORT}|$HTTP_PORT|g" \
-            -e "s|\${FRONTEND_ROOT}|$FRONTEND_ROOT|g" \
-            -e "s|\${BACKEND_PORT}|$BACKEND_PORT|g" \
-            < "$PROJECT_ROOT/nginx/ptmm-internal.conf" \
-            | sudo tee /etc/nginx/sites-available/ptmm > /dev/null
-    fi
-    sudo ln -sf /etc/nginx/sites-available/ptmm /etc/nginx/sites-enabled/ptmm
-    if ! sudo nginx -t; then
-        echo "Error: nginx config test failed."
-        exit 1
-    fi
-    sudo systemctl reload nginx
-    echo "Nginx config installed."
-    echo ""
-    echo "Frontend files served from: $FRONTEND_ROOT"
+        < "$PROJECT_ROOT/nginx/ptmm.conf" \
+        | sudo tee /etc/nginx/sites-available/ptmm > /dev/null
 else
-    echo "Unknown mode: $MODE"
+    sed \
+        -e "s|\${HTTP_PORT}|$HTTP_PORT|g" \
+        -e "s|\${FRONTEND_ROOT}|$FRONTEND_ROOT|g" \
+        -e "s|\${BACKEND_PORT}|$BACKEND_PORT|g" \
+        < "$PROJECT_ROOT/nginx/ptmm-internal.conf" \
+        | sudo tee /etc/nginx/sites-available/ptmm > /dev/null
+fi
+sudo ln -sf /etc/nginx/sites-available/ptmm /etc/nginx/sites-enabled/ptmm
+if ! sudo nginx -t; then
+    echo "Error: nginx config test failed."
     exit 1
 fi
+sudo systemctl reload nginx
+echo "Nginx config installed."
+echo ""
+echo "Frontend files served from: $FRONTEND_ROOT"
 
 # Write state file (contains secrets, keep permissions tight)
 
 {
     echo "MODE=$MODE"
     echo "TMDB_API_KEY=$TMDB_API_KEY"
-    if is_deploy_mode; then
-        echo "DEPLOY_USER=$DEPLOY_USER"
-        echo "BACKEND_PORT=$BACKEND_PORT"
-        echo "FRONTEND_ROOT=$FRONTEND_ROOT"
-    fi
+    echo "DEPLOY_USER=$DEPLOY_USER"
+    echo "BACKEND_PORT=$BACKEND_PORT"
+    echo "FRONTEND_ROOT=$FRONTEND_ROOT"
     if [[ "$MODE" == "internal" ]]; then
         echo "HTTP_PORT=$HTTP_PORT"
     fi
