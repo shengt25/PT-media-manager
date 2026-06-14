@@ -18,6 +18,10 @@ load_state() {
 
 echo "PT Media Manager Installer"
 
+is_deploy_mode() {
+    [[ "$MODE" == "internal" || "$MODE" == "public" ]]
+}
+
 # Step 1: Reuse previous config?
 
 REUSE_CONFIG=false
@@ -27,11 +31,17 @@ if [[ -f "$STATE_FILE" ]]; then
     echo ""
     echo "Found previous install config ($STATE_FILE):"
     echo "  Mode: $MODE"
+    if is_deploy_mode; then
+        echo "  Deploy user: ${DEPLOY_USER:-$(whoami)}"
+        echo "  Backend port: ${BACKEND_PORT:-8000}"
+        echo "  Frontend root: ${FRONTEND_ROOT:-/var/www/ptmm}"
+    fi
+    if [[ "$MODE" == "internal" ]]; then
+        echo "  HTTP port: ${HTTP_PORT:-8080}"
+    fi
     if [[ "$MODE" == "public" ]]; then
         echo "  Domain: $DOMAIN"
-        echo "  Deploy user: $DEPLOY_USER"
-        echo "  Ports: https=$HTTPS_PORT backend=$BACKEND_PORT"
-        echo "  Frontend root: ${FRONTEND_ROOT:-/var/www/ptmm}"
+        echo "  HTTPS port: ${HTTPS_PORT:-443}"
     fi
     echo ""
     read -rp "Reuse this configuration and reinstall? [Y/n]: " REUSE_CHOICE
@@ -47,13 +57,13 @@ if [[ "$REUSE_CONFIG" == false ]]; then
 
     echo ""
     echo "Deploy mode:"
-    echo "  1) Local only  (no auth, localhost access)"
+    echo "  1) Internal    (HTTP + private network access, no auth)"
     echo "  2) Public      (HTTPS + JWT auth)"
     echo ""
     read -rp "Select [1/2]: " MODE_CHOICE
 
     case "$MODE_CHOICE" in
-        1) MODE="local" ;;
+        1) MODE="internal" ;;
         2) MODE="public" ;;
         *)
             echo "Invalid choice. Aborting."
@@ -75,6 +85,15 @@ fi
 
 if ! command -v npm &>/dev/null; then
     MISSING_DEPS+=("npm  ->  https://nodejs.org/")
+fi
+
+if is_deploy_mode; then
+    if ! command -v systemctl &>/dev/null; then
+        MISSING_DEPS+=("systemctl")
+    fi
+    if ! command -v nginx &>/dev/null; then
+        MISSING_DEPS+=("nginx")
+    fi
 fi
 
 if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
@@ -104,22 +123,35 @@ if [[ "$REUSE_CONFIG" == false ]]; then
 
     DEPLOY_USER=""
     DOMAIN=""
+    HTTP_PORT=""
+    HTTPS_PORT=""
+    BACKEND_PORT=""
+    FRONTEND_ROOT=""
     AUTH_USERNAME=""
     AUTH_PASSWORD_HASH=""
     JWT_SECRET=""
 
-    if [[ "$MODE" == "public" ]]; then
-        read -rp "Domain (e.g. ptmm.example.com): " DOMAIN
+    if is_deploy_mode; then
         read -rp "Deploy user (default: $(whoami)): " DEPLOY_USER
         DEPLOY_USER="${DEPLOY_USER:-$(whoami)}"
 
-        read -rp "HTTPS port (default: 443): " HTTPS_PORT
-        HTTPS_PORT="${HTTPS_PORT:-443}"
         read -rp "Backend port (default: 8000): " BACKEND_PORT
         BACKEND_PORT="${BACKEND_PORT:-8000}"
 
         read -rp "Frontend static directory (default: /var/www/ptmm): " FRONTEND_ROOT
         FRONTEND_ROOT="${FRONTEND_ROOT:-/var/www/ptmm}"
+    fi
+
+    if [[ "$MODE" == "internal" ]]; then
+        read -rp "HTTP port (default: 8080): " HTTP_PORT
+        HTTP_PORT="${HTTP_PORT:-8080}"
+    fi
+
+    if [[ "$MODE" == "public" ]]; then
+        read -rp "Domain (e.g. ptmm.example.com): " DOMAIN
+
+        read -rp "HTTPS port (default: 443): " HTTPS_PORT
+        HTTPS_PORT="${HTTPS_PORT:-443}"
 
         echo ""
         echo "SSL certificate paths:"
@@ -142,18 +174,26 @@ if [[ "$REUSE_CONFIG" == false ]]; then
         fi
 
         echo "Generating password hash and JWT secret..."
-        AUTH_PASSWORD_HASH=$(uv run --directory "$PROJECT_ROOT/backend" python -c "import bcrypt; print(bcrypt.hashpw(b'${AUTH_PASSWORD_PLAIN}', bcrypt.gensalt()).decode())")
-        JWT_SECRET=$(uv run --directory "$PROJECT_ROOT/backend" python -c "import secrets; print(secrets.token_hex(32))")
+        AUTH_PASSWORD_HASH=$(uv run --directory "$PROJECT_ROOT/backend" --frozen python -c "import bcrypt; print(bcrypt.hashpw(b'${AUTH_PASSWORD_PLAIN}', bcrypt.gensalt()).decode())")
+        JWT_SECRET=$(uv run --directory "$PROJECT_ROOT/backend" --frozen python -c "import secrets; print(secrets.token_hex(32))")
     fi
 else
     echo ""
     echo "Reusing saved configuration."
-    if [[ "$MODE" == "public" ]]; then
+    if is_deploy_mode; then
+        DEPLOY_USER="${DEPLOY_USER:-$(whoami)}"
+        BACKEND_PORT="${BACKEND_PORT:-8000}"
         FRONTEND_ROOT="${FRONTEND_ROOT:-/var/www/ptmm}"
+    fi
+    if [[ "$MODE" == "internal" ]]; then
+        HTTP_PORT="${HTTP_PORT:-8080}"
+    fi
+    if [[ "$MODE" == "public" ]]; then
+        HTTPS_PORT="${HTTPS_PORT:-443}"
     fi
 fi
 
-if [[ "$MODE" == "public" ]]; then
+if is_deploy_mode; then
     case "$FRONTEND_ROOT" in
         /*) ;;
         *)
@@ -172,8 +212,8 @@ fi
 echo ""
 echo "[1/4] Building frontend..."
 cd "$PROJECT_ROOT/frontend"
-npm install
-if [[ "$MODE" == "public" ]]; then
+npm ci
+if is_deploy_mode; then
     VITE_API_BASE=/api npm run build
 else
     npm run build
@@ -202,14 +242,14 @@ chmod 600 "$PROJECT_ROOT/backend/.env"
 
 echo ""
 echo "[3/4] Syncing Python dependencies..."
-uv sync --no-dev --directory "$PROJECT_ROOT/backend"
+uv sync --no-dev --frozen --directory "$PROJECT_ROOT/backend"
 
-# Step 7: Install system services (public only)
+# Step 7: Install system services
 
 echo ""
 echo "[4/4] Installing system services..."
 
-if [[ "$MODE" == "public" ]]; then
+if is_deploy_mode; then
     UV_BIN="$(command -v uv)"
 
     echo "Publishing frontend to $FRONTEND_ROOT..."
@@ -233,15 +273,24 @@ if [[ "$MODE" == "public" ]]; then
     echo "Backend service started."
 
     sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-    sed \
-        -e "s|\${DOMAIN}|$DOMAIN|g" \
-        -e "s|\${FRONTEND_ROOT}|$FRONTEND_ROOT|g" \
-        -e "s|\${SSL_CERT}|$SSL_CERT|g" \
-        -e "s|\${SSL_KEY}|$SSL_KEY|g" \
-        -e "s|\${HTTPS_PORT}|$HTTPS_PORT|g" \
-        -e "s|\${BACKEND_PORT}|$BACKEND_PORT|g" \
-        < "$PROJECT_ROOT/nginx/ptmm.conf" \
-        | sudo tee /etc/nginx/sites-available/ptmm > /dev/null
+    if [[ "$MODE" == "public" ]]; then
+        sed \
+            -e "s|\${DOMAIN}|$DOMAIN|g" \
+            -e "s|\${FRONTEND_ROOT}|$FRONTEND_ROOT|g" \
+            -e "s|\${SSL_CERT}|$SSL_CERT|g" \
+            -e "s|\${SSL_KEY}|$SSL_KEY|g" \
+            -e "s|\${HTTPS_PORT}|$HTTPS_PORT|g" \
+            -e "s|\${BACKEND_PORT}|$BACKEND_PORT|g" \
+            < "$PROJECT_ROOT/nginx/ptmm.conf" \
+            | sudo tee /etc/nginx/sites-available/ptmm > /dev/null
+    else
+        sed \
+            -e "s|\${HTTP_PORT}|$HTTP_PORT|g" \
+            -e "s|\${FRONTEND_ROOT}|$FRONTEND_ROOT|g" \
+            -e "s|\${BACKEND_PORT}|$BACKEND_PORT|g" \
+            < "$PROJECT_ROOT/nginx/ptmm-internal.conf" \
+            | sudo tee /etc/nginx/sites-available/ptmm > /dev/null
+    fi
     sudo ln -sf /etc/nginx/sites-available/ptmm /etc/nginx/sites-enabled/ptmm
     if ! sudo nginx -t; then
         echo "Error: nginx config test failed."
@@ -252,7 +301,8 @@ if [[ "$MODE" == "public" ]]; then
     echo ""
     echo "Frontend files served from: $FRONTEND_ROOT"
 else
-    echo "Local mode, skipping systemd and nginx."
+    echo "Unknown mode: $MODE"
+    exit 1
 fi
 
 # Write state file (contains secrets, keep permissions tight)
@@ -260,12 +310,17 @@ fi
 {
     echo "MODE=$MODE"
     echo "TMDB_API_KEY=$TMDB_API_KEY"
-    if [[ "$MODE" == "public" ]]; then
-        echo "DOMAIN=$DOMAIN"
+    if is_deploy_mode; then
         echo "DEPLOY_USER=$DEPLOY_USER"
-        echo "HTTPS_PORT=$HTTPS_PORT"
         echo "BACKEND_PORT=$BACKEND_PORT"
         echo "FRONTEND_ROOT=$FRONTEND_ROOT"
+    fi
+    if [[ "$MODE" == "internal" ]]; then
+        echo "HTTP_PORT=$HTTP_PORT"
+    fi
+    if [[ "$MODE" == "public" ]]; then
+        echo "DOMAIN=$DOMAIN"
+        echo "HTTPS_PORT=$HTTPS_PORT"
         echo "SSL_CERT=$SSL_CERT"
         echo "SSL_KEY=$SSL_KEY"
         echo "AUTH_USERNAME=$AUTH_USERNAME"
@@ -279,6 +334,5 @@ echo ""
 if [[ "$MODE" == "public" ]]; then
     echo "Done! Visit https://$DOMAIN"
 else
-    echo "Done! Start the backend:"
-    echo "  cd $PROJECT_ROOT/backend && uv run dev.py"
+    echo "Done! Visit http://<NAS-IP>:$HTTP_PORT"
 fi

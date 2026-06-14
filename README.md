@@ -50,21 +50,23 @@ npm run dev            # http://localhost:5173
 
 ## Deployment
 
+The installer supports two deployment modes:
+
+- **Internal**: HTTP, no auth, intended for access by NAS IP inside a trusted private network
+- **Public**: HTTPS + JWT auth, intended for domain-based internet access
+
 ```bash
 # 1. Clone on server, set up config
 cp .env.example .env
 vim .env
 
-# 2. Set up SSL first
+# 2. For public mode only, set up SSL first
 sudo certbot --nginx -d yourdomain.com
 
-# 3. Create Basic Auth password
-sudo htpasswd -c /etc/nginx/.htpasswd username
-
-# 4. Install
+# 3. Install
 bash install.sh
 
-# 5. Update (after git pull)
+# 4. Update (after git pull)
 bash install.sh
 ```
 

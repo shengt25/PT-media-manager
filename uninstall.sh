@@ -17,6 +17,11 @@ load_state() {
 }
 
 echo "Uninstalling PT Media Manager..."
+
+is_deploy_mode() {
+    [[ "$MODE" == "internal" || "$MODE" == "public" ]]
+}
+
 read -r -p "This will stop services and remove system configs. Continue? [y/N] " confirm
 if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     echo "Aborted."
@@ -32,9 +37,9 @@ else
     echo "Warning: .ptmm-install not found, assuming public mode."
 fi
 
-#  Remove systemd service (public mode only) 
+#  Remove systemd service and nginx config
 
-if [[ "$MODE" == "public" ]]; then
+if is_deploy_mode; then
     if systemctl is-active --quiet ptmm 2>/dev/null; then
         sudo systemctl stop ptmm
     fi
