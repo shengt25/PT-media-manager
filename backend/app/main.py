@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import init_db
-from app.routers import entries, media, scan, scrape
+from app.routers import entries, media, scan, scrape, settings as settings_router
 from app.routers import auth as auth_router
 from app.core.auth import verify_token
 from app.core.backup import run_backup, _needs_backup
@@ -50,3 +50,4 @@ app.include_router(entries.router, dependencies=[Depends(verify_token)])
 app.include_router(media.router, dependencies=[Depends(verify_token)])
 app.include_router(scan.router, dependencies=[Depends(verify_token)])
 app.include_router(scrape.router, dependencies=[Depends(verify_token)])
+app.include_router(settings_router.router, dependencies=[Depends(verify_token)])

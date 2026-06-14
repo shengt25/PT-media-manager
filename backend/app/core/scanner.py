@@ -22,6 +22,19 @@ def _is_only_hidden(path: Path) -> bool:
     return len(all_files) > 0 and all(f.name.startswith(".") for f in all_files)
 
 
+def _movie_source_exists(source: Path, source_name: str) -> bool:
+    """Check whether a movie's source item (directory or standalone video file) still exists."""
+    item = source / source_name
+    if item.is_dir():
+        return not _is_only_hidden(item)
+    if item.exists():
+        return True
+    return any(
+        f.is_file() and f.suffix.lower() in VIDEO_EXT and not _is_incomplete(f)
+        for f in source.glob(f"{source_name}.*")
+    )
+
+
 def find_main_video_stem(media_dir: Path) -> str | None:
     """Return the stem of the largest video/disc file directly in media_dir, or None if there isn't one."""
     if not media_dir.exists():
@@ -57,27 +70,31 @@ def scan_entry(entry: Entry, existing_media: list[Media]) -> ScanResult:
     added = []
     notes = []
 
+    existing_names = {m.source_name for m in existing_media}
+
     if entry.media_type == "movie":
-        existing_pairs = {(m.source_name, m.video_stem) for m in existing_media}
         for item in items:
-            if not item.is_dir():
+            name = item.name
+            if name.startswith("."):
                 continue
-            folder_name = item.name
-            if folder_name.startswith("."):
-                continue
-            if _is_incomplete(item):
-                continue
-            if _is_only_hidden(item):
-                notes.append(f'"{folder_name}" has only hidden files in source, directory may be a leftover')
-                continue
-            video_stem = find_main_video_stem(item)
-            if video_stem is None:
-                continue
-            if (folder_name, video_stem) in existing_pairs:
-                continue
-            added.append({"source_name": folder_name, "video_stem": video_stem})
+            if item.is_dir():
+                if name in existing_names:
+                    continue
+                if _is_incomplete(item):
+                    continue
+                if _is_only_hidden(item):
+                    notes.append(f'"{name}" has only hidden files in source, directory may be a leftover')
+                    continue
+                if find_main_video_stem(item) is None:
+                    continue
+                added.append({"source_path": name})
+            elif item.is_file():
+                if item.suffix.lower() not in VIDEO_EXT or _is_incomplete(item):
+                    continue
+                if item.stem in existing_names:
+                    continue
+                added.append({"source_path": name})
     else:
-        existing_names = {m.source_name for m in existing_media}
         for item in items:
             name = item.name
             if name in existing_names:
@@ -89,20 +106,20 @@ def scan_entry(entry: Entry, existing_media: list[Media]) -> ScanResult:
             if _is_only_hidden(source / name):
                 notes.append(f'"{name}" has only hidden files in source, directory may be a leftover')
                 continue
-            added.append({"source_name": name, "video_stem": None})
+            added.append({"source_path": name})
 
     removed = []
     link_missing = []
     for media in existing_media:
-        source_item = source / media.source_name
-        source_gone = not source_item.exists() or _is_only_hidden(source_item)
+        if entry.media_type == "movie":
+            source_gone = not _movie_source_exists(source, media.source_name)
+        else:
+            source_item = source / media.source_name
+            source_gone = not source_item.exists() or _is_only_hidden(source_item)
 
-        if entry.media_type == "movie" and media.video_stem:
+        if entry.media_type == "movie":
             link_dir = Path(entry.link_path) / media.source_name
-            link_gone = not link_dir.exists() or not any(
-                f for f in link_dir.glob(f"{media.video_stem}.*")
-                if f.suffix.lower() in VIDEO_EXT
-            )
+            link_gone = find_main_video_stem(link_dir) is None
         else:
             link_gone = not (Path(entry.link_path) / media.source_name).exists()
 

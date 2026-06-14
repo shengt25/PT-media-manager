@@ -54,14 +54,12 @@ def _calc_size(media_dir: Path) -> int | None:
     return sum(f.stat().st_size for f in media_dir.rglob("*") if f.is_file())
 
 
-def _scan_media(source_name: str, link_path: str, media_type: str) -> tuple[str, int | None, str | None, int | None, str | None, str | None]:
+def _scan_media(source_name: str, link_path: str, media_type: str) -> tuple[str, int | None, str | None, int | None, str | None]:
     media_dir = Path(link_path) / source_name
-    video_stem = None
     if media_type == "movie":
         nfo_candidates = list(media_dir.glob("*.nfo")) if media_dir.exists() else []
         if nfo_candidates:
             nfo_path = nfo_candidates[0]
-            video_stem = nfo_path.stem
         else:
             nfo_path = media_dir / f"{source_name}.nfo"
     else:
@@ -70,15 +68,15 @@ def _scan_media(source_name: str, link_path: str, media_type: str) -> tuple[str,
     size = _calc_size(media_dir)
 
     if not nfo_path.exists():
-        return "pending", None, None, size, None, None
+        return "pending", None, None, size, None
 
     try:
         tmdb_id = _read_tmdb_id(nfo_path)
     except (ValueError, ET.ParseError) as e:
-        return "pending", None, None, size, str(e), None
+        return "pending", None, None, size, str(e)
 
     generated = _collect_generated(media_dir)
-    return "confirmed", tmdb_id, json.dumps(generated), size, None, video_stem
+    return "confirmed", tmdb_id, json.dumps(generated), size, None
 
 
 def migrate(old_db: Path, dry_run: bool = False):
@@ -106,7 +104,7 @@ def migrate(old_db: Path, dry_run: bool = False):
             confirmed = 0
             pending = 0
             for media_name, _ in media_rows:
-                status, _, _, _, warn, _ = _scan_media(media_name, link_path, media_type)
+                status, _, _, _, warn = _scan_media(media_name, link_path, media_type)
                 if status == "confirmed":
                     confirmed += 1
                 else:
@@ -152,13 +150,13 @@ def migrate(old_db: Path, dry_run: bool = False):
         confirmed = 0
         pending = 0
         for media_name, date in media_rows:
-            status, tmdb_id, generated_files, size, warn, video_stem = _scan_media(media_name, link_path, media_type)
+            status, tmdb_id, generated_files, size, warn = _scan_media(media_name, link_path, media_type)
             if warn:
                 warnings.append(f"{entry_name}/{media_name}: {warn}")
             new.execute(
-                "INSERT INTO media (entry_id, source_name, video_stem, date_added, scrape_status, tmdb_id, generated_files, size)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (entry_id, media_name, video_stem, date, status, tmdb_id, generated_files, size),
+                "INSERT INTO media (entry_id, source_name, date_added, scrape_status, tmdb_id, generated_files, size)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (entry_id, media_name, date, status, tmdb_id, generated_files, size),
             )
             if status == "confirmed":
                 confirmed += 1
@@ -193,7 +191,6 @@ def _create_schema(conn: sqlite3.Connection):
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             entry_id        INTEGER NOT NULL REFERENCES entry(id),
             source_name     TEXT    NOT NULL,
-            video_stem      TEXT,
             date_added      TEXT    NOT NULL,
             scrape_status   TEXT    NOT NULL DEFAULT 'pending',
             tmdb_id         INTEGER,

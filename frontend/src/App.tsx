@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { Layout } from './components/Layout'
 import { Library } from './pages/Library'
+import { Sources } from './pages/Sources'
 import { Settings } from './pages/Settings'
 import { Login } from './pages/Login'
 
@@ -36,6 +37,7 @@ export default function App() {
         <Route element={<AuthGuard><Layout /></AuthGuard>}>
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/library" element={<Library />} />
+          <Route path="/sources" element={<Sources />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

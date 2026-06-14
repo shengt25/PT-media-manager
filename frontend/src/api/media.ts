@@ -4,7 +4,6 @@ export interface Media {
   id: number
   entry_id: number
   source_name: string
-  video_stem: string | null
   date_added: string
   scrape_status: 'pending' | 'confirmed' | 'skipped'
   tmdb_id: number | null

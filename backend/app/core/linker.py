@@ -19,7 +19,7 @@ def create_links(source_path: str, link_path: str, name: str, link_name: str | N
 
     try:
         if source.is_file():
-            subdir = Path(link_path) / Path(target_name).stem
+            subdir = Path(link_path) / (Path(target_name).stem if link_name is None else target_name)
             subdir.mkdir(parents=True, exist_ok=True)
             link_file = subdir / source.name
             os.link(source, link_file)

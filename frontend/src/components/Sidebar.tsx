@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 
 const links = [
   { to: '/library', label: 'Library' },
+  { to: '/sources', label: 'Sources' },
   { to: '/settings', label: 'Settings' },
 ]
 

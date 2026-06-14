@@ -14,19 +14,19 @@ export function ScanQueue({ results, onConfirmedAdd, onConfirmedRemove }: Props)
   const [loading, setLoading] = useState<string | null>(null)
 
   const allRows = results.flatMap(r => [
-    ...r.added.map(item => ({ type: 'add' as const, entryId: r.entry_id, entryName: r.entry_name, name: item.source_name, videoStem: item.video_stem, id: `add-${r.entry_id}-${item.source_name}` })),
+    ...r.added.map(item => ({ type: 'add' as const, entryId: r.entry_id, entryName: r.entry_name, name: item.source_path, id: `add-${r.entry_id}-${item.source_path}` })),
     ...r.removed.map(m => ({ type: 'remove' as const, entryId: r.entry_id, entryName: r.entry_name, name: m.source_name, mediaId: m.id, id: `rm-${m.id}` })),
   ])
 
   if (allRows.length === 0) return null
 
-  async function handleAdd(entryId: number, sourceName: string, videoStem: string | null) {
-    const key = `add-${entryId}-${sourceName}`
+  async function handleAdd(entryId: number, sourcePath: string) {
+    const key = `add-${entryId}-${sourcePath}`
     setLoading(key)
     try {
-      await confirmAdd(entryId, sourceName, videoStem)
-      toast.success(`Added: ${sourceName}`)
-      onConfirmedAdd(entryId, sourceName)
+      await confirmAdd(entryId, sourcePath)
+      toast.success(`Added: ${sourcePath}`)
+      onConfirmedAdd(entryId, sourcePath)
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e))
     } finally {
@@ -49,7 +49,7 @@ export function ScanQueue({ results, onConfirmedAdd, onConfirmedRemove }: Props)
   }
 
   return (
-    <div className="border-b bg-muted/40">
+    <div className="m-3 rounded-lg border bg-muted/40 shadow-sm overflow-hidden">
       <div className="px-4 py-2 flex items-center gap-2">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Scan Results
@@ -76,7 +76,7 @@ export function ScanQueue({ results, onConfirmedAdd, onConfirmedRemove }: Props)
               disabled={loading === row.id}
               onClick={() =>
                 row.type === 'add'
-                  ? handleAdd(row.entryId, row.name, row.videoStem)
+                  ? handleAdd(row.entryId, row.name)
                   : handleRemove(row.entryId, row.mediaId!, row.name)
               }
             >

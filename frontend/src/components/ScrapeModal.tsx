@@ -40,33 +40,6 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
   const [confirming, setConfirming] = useState(false)
   const [fetchingPoster, setFetchingPoster] = useState(false)
 
-  useEffect(() => {
-    if (!open || !media) return
-    setCandidates([])
-    setSelected(null)
-    setPreviewPoster(null)
-    setConfirming(false)
-
-    const title = media.source_name.replace(/\.[^.]+$/, '').replace(/[._]/g, ' ').trim()
-    setQuery(title)
-    setSearching(true)
-    searchScrape(media.id, title, undefined, language)
-      .then(results => {
-        setCandidates(results)
-        if (results.length === 1) selectCandidate(results[0], imageLanguage)
-      })
-      .catch(e => toast.error(e.message))
-      .finally(() => setSearching(false))
-  }, [open, media?.id])
-
-  function selectCandidate(c: TmdbCandidate, imgLang: string) {
-    setSelected(c)
-    setPreviewPoster(c.poster_path)
-    if (imgLang !== language && entry) {
-      fetchPoster(c.tmdb_id, entry.media_type, imgLang)
-    }
-  }
-
   async function fetchPoster(tmdbId: number, mediaType: string, imgLang: string) {
     setFetchingPoster(true)
     try {
@@ -79,12 +52,38 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
     }
   }
 
-  function handleSelectCandidate(c: TmdbCandidate) {
+  function selectCandidate(c: TmdbCandidate, imgLang: string) {
     setSelected(c)
     setPreviewPoster(c.poster_path)
-    if (imageLanguage !== language && entry) {
-      fetchPoster(c.tmdb_id, entry.media_type, imageLanguage)
+    if (imgLang !== language && entry) {
+      fetchPoster(c.tmdb_id, entry.media_type, imgLang)
     }
+  }
+
+  useEffect(() => {
+    if (!open || !media) return
+    setCandidates([])
+    setSelected(null)
+    setPreviewPoster(null)
+    setConfirming(false)
+
+    const title = media.source_name.replace(/[._]/g, ' ').trim()
+    setQuery(title)
+    setSearching(true)
+    searchScrape(media.id, title, undefined, language)
+      .then(results => {
+        setCandidates(results)
+        if (results.length === 1) selectCandidate(results[0], imageLanguage)
+      })
+      .catch(e => toast.error(e.message))
+      .finally(() => setSearching(false))
+    // Intentionally only reset/search when the modal opens for a (possibly new) media item,
+    // not on every language/imageLanguage change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, media?.id])
+
+  function handleSelectCandidate(c: TmdbCandidate) {
+    selectCandidate(c, imageLanguage)
   }
 
   function handleImageLanguageChange(lang: string | null) {
@@ -131,7 +130,7 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
   }
 
   if (!media || !entry) return null
-  const displayName = media.video_stem ?? media.source_name
+  const displayName = media.source_name
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>

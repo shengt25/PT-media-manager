@@ -1,3 +1,4 @@
+import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.dom import minidom
@@ -48,13 +49,26 @@ def write_tvshow_nfo(link_path: str, name: str, data: dict) -> str:
     return _write(Path(link_path) / name / "tvshow.nfo", root)
 
 
-def nfo_exists(link_path: str, source_name: str, media_type: str, video_stem: str | None = None) -> bool:
-    base = Path(link_path) / source_name
-    if media_type == "movie":
-        if not video_stem:
-            return False
-        return (base / f"{video_stem}.nfo").exists()
-    return (base / "tvshow.nfo").exists()
+def _find_nfo_path(generated_files: str | None, media_type: str) -> Path | None:
+    if not generated_files:
+        return None
+    try:
+        paths = json.loads(generated_files)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    for f in paths:
+        if media_type == "movie":
+            if f.endswith(".nfo"):
+                return Path(f)
+        else:
+            if Path(f).name == "tvshow.nfo":
+                return Path(f)
+    return None
+
+
+def nfo_exists(generated_files: str | None, media_type: str) -> bool:
+    nfo_path = _find_nfo_path(generated_files, media_type)
+    return nfo_path is not None and nfo_path.exists()
 
 
 def write_episode_nfo(video_path: Path, data: dict) -> str:
@@ -96,15 +110,9 @@ def read_episode_nfos(link_path: str, name: str) -> list[dict]:
     return episodes
 
 
-def read_nfo(link_path: str, source_name: str, media_type: str, video_stem: str | None = None) -> dict:
-    base = Path(link_path) / source_name
-    if media_type == "movie":
-        if not video_stem:
-            return {}
-        nfo_path = base / f"{video_stem}.nfo"
-    else:
-        nfo_path = base / "tvshow.nfo"
-    if not nfo_path.exists():
+def read_nfo(generated_files: str | None, media_type: str) -> dict:
+    nfo_path = _find_nfo_path(generated_files, media_type)
+    if nfo_path is None or not nfo_path.exists():
         return {}
     try:
         tree = ET.parse(nfo_path)

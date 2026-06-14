@@ -19,7 +19,6 @@ export function Library() {
   const [loading, setLoading] = useState(true)
 
   const loadAll = useCallback(async () => {
-    setLoading(true)
     try {
       const es = await listEntries()
       setEntries(es)
@@ -76,9 +75,9 @@ export function Library() {
     }
   }
 
-  function handleConfirmedAdd(entryId: number, sourceName: string) {
+  function handleConfirmedAdd(entryId: number, sourcePath: string) {
     setScanResults(prev =>
-      prev.map(r => r.entry_id === entryId ? { ...r, added: r.added.filter(n => n !== sourceName) } : r)
+      prev.map(r => r.entry_id === entryId ? { ...r, added: r.added.filter(n => n.source_path !== sourcePath) } : r)
           .filter(r => r.added.length > 0 || r.removed.length > 0)
     )
     refreshMedia(entryId)

@@ -24,7 +24,7 @@ def scan_all(session: Session = Depends(get_session)):
         # reset scrape_status to pending if NFO file has been deleted
         for media in existing:
             if media.scrape_status == "confirmed":
-                if not nfo_exists(entry.link_path, media.source_name, entry.media_type, video_stem=media.video_stem):
+                if not nfo_exists(media.generated_files, entry.media_type):
                     media.scrape_status = "pending"
                     crud.media_update(session, media)
 
@@ -56,8 +56,7 @@ def scan_all(session: Session = Depends(get_session)):
 
 class ConfirmAdd(BaseModel):
     entry_id: int
-    source_name: str
-    video_stem: str | None = None
+    source_path: str
 
 
 class ConfirmRemove(BaseModel):
@@ -69,19 +68,24 @@ def confirm_add(data: ConfirmAdd, session: Session = Depends(get_session)):
     entry = crud.entry_get(session, data.entry_id)
     if not entry:
         raise HTTPException(404, "Entry not found")
-    video_stem = data.video_stem
-    if crud.media_get_by_source_and_link(session, data.entry_id, data.source_name, video_stem):
+    item_path = Path(entry.source_path) / data.source_path
+    if not item_path.exists():
+        raise HTTPException(422, f"Source not found: {data.source_path}")
+    if entry.media_type == "movie" and item_path.is_file():
+        source_name = item_path.stem
+        link_name = source_name
+    else:
+        source_name = data.source_path
+        link_name = None
+    if crud.media_get_by_source_name(session, data.entry_id, source_name):
         raise HTTPException(400, "Media already exists")
-    if not (Path(entry.source_path) / data.source_name).exists():
-        raise HTTPException(422, f"Source not found: {data.source_name}")
-    link_dir = Path(entry.link_path) / data.source_name
+    link_dir = Path(entry.link_path) / source_name
     if not link_dir.exists():
-        create_links(entry.source_path, entry.link_path, data.source_name)
+        create_links(entry.source_path, entry.link_path, data.source_path, link_name=link_name)
     size = sum(f.stat().st_size for f in link_dir.rglob("*") if f.is_file())
     media = Media(
         entry_id=data.entry_id,
-        source_name=data.source_name,
-        video_stem=video_stem,
+        source_name=source_name,
         date_added=datetime.now().isoformat(timespec="seconds"),
         size=size,
     )

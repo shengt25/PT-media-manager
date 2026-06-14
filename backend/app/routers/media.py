@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -19,7 +20,7 @@ def list_media(entry_id: int, session: Session = Depends(get_session)):
     for m in media_list:
         item = m.model_dump()
         if m.scrape_status == "confirmed":
-            item["metadata"] = read_nfo(entry.link_path, m.source_name, entry.media_type, video_stem=m.video_stem)
+            item["metadata"] = read_nfo(m.generated_files, entry.media_type)
         result.append(item)
     return result
 
@@ -29,17 +30,16 @@ def get_poster(media_id: int, session: Session = Depends(get_session)):
     media = crud.media_get(session, media_id)
     if not media:
         raise HTTPException(404, "Media not found")
-    entry = crud.entry_get(session, media.entry_id)
-    if entry.media_type == "movie":
-        if not media.video_stem:
-            raise HTTPException(404, "Poster not found")
-        filename = f"{media.video_stem}-poster.jpg"
-    else:
-        filename = "poster.jpg"
-    path = Path(entry.link_path) / media.source_name / filename
-    if not path.exists():
+    if not media.generated_files:
         raise HTTPException(404, "Poster not found")
-    return FileResponse(path, media_type="image/jpeg")
+    try:
+        paths = json.loads(media.generated_files)
+    except (json.JSONDecodeError, TypeError):
+        raise HTTPException(404, "Poster not found")
+    poster_path = next((p for p in paths if p.endswith("poster.jpg")), None)
+    if poster_path is None or not Path(poster_path).exists():
+        raise HTTPException(404, "Poster not found")
+    return FileResponse(poster_path, media_type="image/jpeg")
 
 
 @router.get("/{media_id}/episodes")

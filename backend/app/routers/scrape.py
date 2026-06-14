@@ -26,13 +26,13 @@ def _delete_generated_files(media):
 
 
 def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "zh-CN", image_language: str | None = None):
-    tmdb_data = fetch_tmdb_detail(tmdb_id, entry.media_type, language, image_language)
+    proxy = crud.get_app_settings(session).tmdb_proxy
+    tmdb_data = fetch_tmdb_detail(tmdb_id, entry.media_type, language, image_language, proxy)
 
     if entry.media_type == "movie":
-        if not media.video_stem:
-            link_dir = Path(entry.link_path) / media.source_name
-            media.video_stem = find_main_video_stem(link_dir) or media.source_name
-        prefix = f"{media.video_stem}-"
+        link_dir = Path(entry.link_path) / media.source_name
+        video_stem = find_main_video_stem(link_dir) or media.source_name
+        prefix = f"{video_stem}-"
         folder_exists_with_artwork = (Path(entry.link_path) / media.source_name / f"{prefix}poster.jpg").exists()
         generated = download_artwork(
             entry.link_path, media.source_name,
@@ -40,18 +40,20 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
             tmdb_data.get("backdrop_path"),
             skip_if_exists=folder_exists_with_artwork,
             filename_prefix=prefix,
+            proxy=proxy,
         )
-        nfo_path = write_movie_nfo(entry.link_path, media.source_name, media.video_stem, tmdb_data)
+        nfo_path = write_movie_nfo(entry.link_path, media.source_name, video_stem, tmdb_data)
         generated.append(nfo_path)
     else:
         generated = download_artwork(
             entry.link_path, media.source_name,
             tmdb_data.get("poster_path"),
             tmdb_data.get("backdrop_path"),
+            proxy=proxy,
         )
         nfo_path = write_tvshow_nfo(entry.link_path, media.source_name, tmdb_data)
         generated.append(nfo_path)
-        episode_nfos = generate_episode_nfos(entry.link_path, media.source_name, tmdb_id, language)
+        episode_nfos = generate_episode_nfos(entry.link_path, media.source_name, tmdb_id, language, proxy)
         generated.extend(episode_nfos)
 
     media.tmdb_id = tmdb_id
@@ -61,10 +63,11 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
 
 
 @router.get("/poster")
-def get_poster(tmdb_id: int, media_type: str, language: str = "en-US"):
+def get_poster(tmdb_id: int, media_type: str, language: str = "en-US", session: Session = Depends(get_session)):
     from app.core.scraper import _fetch_tmdb_poster
     import httpx as _httpx
-    with _httpx.Client() as client:
+    proxy = crud.get_app_settings(session).tmdb_proxy
+    with _httpx.Client(proxy=proxy) as client:
         path = _fetch_tmdb_poster(client, tmdb_id, media_type, language)
     return {"poster_path": path}
 
@@ -82,7 +85,8 @@ def search(media_id: int, data: SearchRequest, session: Session = Depends(get_se
     if not media:
         raise HTTPException(404, "Media not found")
     entry = crud.entry_get(session, media.entry_id)
-    return search_tmdb(data.query, entry.media_type, data.year, data.language)
+    proxy = crud.get_app_settings(session).tmdb_proxy
+    return search_tmdb(data.query, entry.media_type, data.year, data.language, proxy)
 
 
 class ConfirmRequest(BaseModel):
@@ -120,7 +124,8 @@ def sync_episodes(media_id: int, session: Session = Depends(get_session)):
     entry = crud.entry_get(session, media.entry_id)
     if entry.media_type != "tv":
         raise HTTPException(400, "Not a TV entry")
-    new_nfos = generate_episode_nfos(entry.link_path, media.source_name, media.tmdb_id)
+    proxy = crud.get_app_settings(session).tmdb_proxy
+    new_nfos = generate_episode_nfos(entry.link_path, media.source_name, media.tmdb_id, proxy=proxy)
     existing = json.loads(media.generated_files) if media.generated_files else []
     media.generated_files = json.dumps(existing + new_nfos)
     crud.media_update(session, media)

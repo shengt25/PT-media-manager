@@ -1,5 +1,5 @@
 from sqlmodel import Session, select
-from app.db.models import Entry, Media
+from app.db.models import Entry, Media, AppSettings
 
 
 # --- Entry ---
@@ -51,16 +51,6 @@ def media_get_by_source_name(session: Session, entry_id: int, source_name: str) 
     ).first()
 
 
-def media_get_by_source_and_link(session: Session, entry_id: int, source_name: str, video_stem: str | None) -> Media | None:
-    return session.exec(
-        select(Media).where(
-            Media.entry_id == entry_id,
-            Media.source_name == source_name,
-            Media.video_stem == video_stem,
-        )
-    ).first()
-
-
 def media_create(session: Session, media: Media) -> Media:
     session.add(media)
     session.commit()
@@ -78,3 +68,24 @@ def media_update(session: Session, media: Media) -> Media:
 def media_delete(session: Session, media: Media):
     session.delete(media)
     session.commit()
+
+
+# --- App settings ---
+
+def get_app_settings(session: Session) -> AppSettings:
+    settings = session.get(AppSettings, 1)
+    if not settings:
+        settings = AppSettings(id=1)
+        session.add(settings)
+        session.commit()
+        session.refresh(settings)
+    return settings
+
+
+def update_app_settings(session: Session, tmdb_proxy: str | None) -> AppSettings:
+    settings = get_app_settings(session)
+    settings.tmdb_proxy = tmdb_proxy
+    session.add(settings)
+    session.commit()
+    session.refresh(settings)
+    return settings

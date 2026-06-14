@@ -85,7 +85,7 @@ export function DetailPanel({ media, entry, onRefresh }: Props) {
   }
 
   const metadata = (media as Media & { metadata?: Record<string, string> }).metadata
-  const displayName = media.video_stem ?? media.source_name
+  const displayName = media.source_name
   const isTV = entry.media_type === 'tv'
   const isConfirmed = media.scrape_status === 'confirmed'
 

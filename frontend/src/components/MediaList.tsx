@@ -21,7 +21,7 @@ function StatusDot({ status }: { status: string }) {
 
 function MediaRow({ media, selected, onClick }: { media: Media; selected: boolean; onClick: () => void }) {
   const [posterError, setPosterError] = useState(false)
-  const displayName = media.video_stem ?? media.source_name
+  const displayName = media.source_name
   const metadata = (media as Media & { metadata?: Record<string, string> }).metadata
 
   const title = metadata?.title
@@ -66,7 +66,11 @@ export function MediaList({ entries, mediaMap, selectedId, onSelect }: Props) {
   function toggleCollapse(id: number) {
     setCollapsed(prev => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
       return next
     })
   }
