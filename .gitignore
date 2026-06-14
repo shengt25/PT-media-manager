@@ -1,5 +1,11 @@
 .idea
-src/__pycache__
-tools
 .DS_Store
-test0.py
+__pycache__
+*.pyc
+.venv
+.env
+backend/data/
+*.egg-info
+deploy/.env
+frontend/dist/
+.ptmm-install

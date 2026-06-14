@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+STATE_FILE="$PROJECT_ROOT/.ptmm-install"
+
+echo "Uninstalling PT Media Manager..."
+read -r -p "This will stop services and remove system configs. Continue? [y/N] " confirm
+if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+    echo "Aborted."
+    exit 0
+fi
+
+#  Read install state 
+
+MODE="public"  # safe default: try to remove everything
+if [[ -f "$STATE_FILE" ]]; then
+    source "$STATE_FILE"
+else
+    echo "Warning: .ptmm-install not found, assuming public mode."
+fi
+
+#  Remove systemd service (public mode only) 
+
+if [[ "$MODE" == "public" ]]; then
+    if systemctl is-active --quiet ptmm 2>/dev/null; then
+        sudo systemctl stop ptmm
+    fi
+    sudo systemctl disable ptmm 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/ptmm.service
+    sudo systemctl daemon-reload
+    echo "Systemd service removed."
+
+    #  Remove nginx config 
+
+    sudo rm -f /etc/nginx/sites-enabled/ptmm
+    sudo rm -f /etc/nginx/sites-available/ptmm
+    if sudo nginx -t 2>/dev/null; then
+        sudo systemctl reload nginx
+    fi
+    echo "Nginx config removed."
+fi
+
+#  Remove state file 
+
+rm -f "$STATE_FILE"
+
+echo ""
+echo "Done. Project files at $PROJECT_ROOT are untouched."
+echo "Remove them manually if needed: rm -rf $PROJECT_ROOT"

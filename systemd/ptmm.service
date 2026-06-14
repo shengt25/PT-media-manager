@@ -1,0 +1,16 @@
+[Unit]
+Description=PT Media Manager Backend
+After=network.target
+
+[Service]
+Type=simple
+User=${DEPLOY_USER}
+WorkingDirectory=${PROJECT_ROOT}/backend
+ExecStart=${UV_PATH} run uvicorn app.main:app --host 127.0.0.1 --port ${BACKEND_PORT} --workers 1
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
