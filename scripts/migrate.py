@@ -14,8 +14,8 @@ import sqlite3
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from urllib.error import URLError
-from urllib.request import ProxyHandler, Request, build_opener, urlopen
+
+import httpx
 
 DEFAULT_DB = Path("~/.config/ptmm/ptmm.db").expanduser()
 DEFAULT_BACKEND_ENV = Path(__file__).resolve().parents[1] / "backend" / ".env"
@@ -61,28 +61,24 @@ def _infer_thumb_path(poster_path: str) -> Path:
     return Path(poster_path).with_name(".ptmm-thumb.jpg")
 
 
-def _open_url(request_or_url, proxy: str | None = None, timeout: int = 30):
-    if proxy:
-        opener = build_opener(ProxyHandler({"http": proxy, "https": proxy}))
-        return opener.open(request_or_url, timeout=timeout)
-    return urlopen(request_or_url, timeout=timeout)
-
-
 def _fetch_tmdb_poster_path(tmdb_id: int, media_type: str, api_key: str, proxy: str | None = None) -> str | None:
     endpoint = "movie" if media_type == "movie" else "tv"
-    request = Request(
-        f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}",
-        headers={"Authorization": f"Bearer {api_key}"},
-    )
-    with _open_url(request, proxy, timeout=20) as response:
-        data = json.loads(response.read().decode("utf-8"))
+    with httpx.Client(proxy=proxy, timeout=15) as client:
+        response = client.get(
+            f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        response.raise_for_status()
+        data = response.json()
     return data.get("poster_path")
 
 
 def _download_thumb(thumb_path: Path, poster_path: str, proxy: str | None = None) -> bool:
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
-    with _open_url(f"{TMDB_IMAGE_BASE}{poster_path}", proxy, timeout=30) as response:
-        thumb_path.write_bytes(response.read())
+    with httpx.Client(proxy=proxy, timeout=20) as client:
+        response = client.get(f"{TMDB_IMAGE_BASE}{poster_path}")
+        response.raise_for_status()
+        thumb_path.write_bytes(response.content)
     return True
 
 
@@ -132,7 +128,7 @@ def _ensure_poster_thumb(tmdb_id: int | None, media_type: str, generated_files: 
         if not remote_poster_path:
             return generated_files, "TMDB poster_path missing, thumbnail skipped"
         _download_thumb(thumb_path, remote_poster_path, proxy)
-    except (OSError, URLError, TimeoutError, json.JSONDecodeError) as e:
+    except (OSError, TimeoutError, httpx.HTTPError, json.JSONDecodeError) as e:
         return generated_files, f"thumbnail download failed: {e}"
 
     generated.append(str(thumb_path))
@@ -170,7 +166,7 @@ def _scan_media(source_name: str, link_path: str, media_type: str) -> tuple[str,
     return "confirmed", tmdb_id, json.dumps(generated), size, None
 
 
-def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None, tmdb_proxy: str | None = None):
+def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None, tmdb_proxy: str | None = None, skip_thumbnails: bool = False):
     if not old_db.exists():
         print(f"Error: old database not found: {old_db}")
         sys.exit(1)
@@ -182,7 +178,7 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
     entries = old.execute(
         "SELECT entry_name, source_path, link_path FROM entry_path"
     ).fetchall()
-    print(f"Found {len(entries)} entries in {old_db}")
+    print(f"Found {len(entries)} entries in {old_db}", flush=True)
 
     confirmed_total = 0
     pending_total = 0
@@ -190,11 +186,11 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
 
     if dry_run:
         if tmdb_api_key:
-            print("TMDB API key found; confirmed items can download PTMM thumbnails during migration.")
+            print("TMDB API key found; confirmed items can download PTMM thumbnails during migration.", flush=True)
         else:
-            print("TMDB API key not found; confirmed items will migrate without PTMM thumbnails.")
+            print("TMDB API key not found; confirmed items will migrate without PTMM thumbnails.", flush=True)
         if tmdb_proxy:
-            print(f"TMDB proxy configured: {tmdb_proxy}")
+            print(f"TMDB proxy configured: {tmdb_proxy}", flush=True)
         for entry_name, source_path, link_path in entries:
             media_type = MEDIA_TYPE_MAP.get(entry_name, "movie")
             media_rows = old.execute(
@@ -210,7 +206,7 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
                     pending += 1
                 if warn:
                     warnings.append(f"{entry_name}/{media_name}: {warn}")
-            print(f"  {entry_name} ({media_type}): {len(media_rows)} items: confirmed {confirmed} / pending {pending}")
+            print(f"  {entry_name} ({media_type}): {len(media_rows)} items: confirmed {confirmed} / pending {pending}", flush=True)
             confirmed_total += confirmed
             pending_total += pending
         print(f"\nTotal: confirmed {confirmed_total} / pending {pending_total}")
@@ -224,7 +220,11 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
 
     bak = old_db.with_suffix(".db.bak")
     shutil.copy2(old_db, bak)
-    print(f"Backup saved to: {bak}")
+    print(f"Backup saved to: {bak}", flush=True)
+    if skip_thumbnails:
+        print("Skipping PTMM thumbnail downloads.", flush=True)
+    elif tmdb_proxy:
+        print(f"TMDB proxy configured: {tmdb_proxy}", flush=True)
 
     old_db.unlink()
     new = sqlite3.connect(old_db)
@@ -248,11 +248,13 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
 
         confirmed = 0
         pending = 0
-        for media_name, date in media_rows:
+        print(f"  Migrating {entry_name} ({media_type}): {len(media_rows)} items", flush=True)
+        for index, (media_name, date) in enumerate(media_rows, start=1):
+            print(f"    [{index}/{len(media_rows)}] {media_name}", flush=True)
             status, tmdb_id, generated_files, size, warn = _scan_media(media_name, link_path, media_type)
             if warn:
                 warnings.append(f"{entry_name}/{media_name}: {warn}")
-            if status == "confirmed":
+            if status == "confirmed" and not skip_thumbnails:
                 generated_files, thumb_warn = _ensure_poster_thumb(tmdb_id, media_type, generated_files, tmdb_api_key, tmdb_proxy)
                 if thumb_warn:
                     warnings.append(f"{entry_name}/{media_name}: {thumb_warn}")
@@ -268,7 +270,7 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
 
         confirmed_total += confirmed
         pending_total += pending
-        print(f"  {entry_name} ({media_type}): {len(media_rows)} items: confirmed {confirmed} / pending {pending}")
+        print(f"  {entry_name} ({media_type}): confirmed {confirmed} / pending {pending}", flush=True)
 
     new.commit()
     old.close()
@@ -313,6 +315,8 @@ def main():
                         help="TMDB API key for downloading PTMM thumbnails during migration")
     parser.add_argument("--tmdb-proxy",
                         help="HTTP/HTTPS proxy for TMDB requests, e.g. http://127.0.0.1:7890")
+    parser.add_argument("--skip-thumbnails", action="store_true",
+                        help="Migrate database only; do not download PTMM thumbnails")
     args = parser.parse_args()
 
     if not args.db.exists():
@@ -320,7 +324,13 @@ def main():
         print("Use --db to specify the path.")
         sys.exit(1)
 
-    migrate(args.db, dry_run=args.dry_run, tmdb_api_key=args.tmdb_api_key, tmdb_proxy=args.tmdb_proxy)
+    migrate(
+        args.db,
+        dry_run=args.dry_run,
+        tmdb_api_key=args.tmdb_api_key,
+        tmdb_proxy=args.tmdb_proxy,
+        skip_thumbnails=args.skip_thumbnails,
+    )
 
 
 if __name__ == "__main__":
