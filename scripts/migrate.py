@@ -19,6 +19,7 @@ import httpx
 
 DEFAULT_DB = Path("~/.config/ptmm/ptmm.db").expanduser()
 DEFAULT_BACKEND_ENV = Path(__file__).resolve().parents[1] / "backend" / ".env"
+VIDEO_EXT = {".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".ts", ".flv", ".rmvb", ".webm", ".iso", ".m2ts", ".vob", ".mpg", ".mpeg"}
 
 MEDIA_TYPE_MAP = {
     "Series":    "tv",
@@ -150,6 +151,34 @@ def _calc_size(media_dir: Path) -> int | None:
     return sum(f.stat().st_size for f in media_dir.rglob("*") if f.is_file())
 
 
+def _normalize_movie_source_name(source_path: str, link_path: str, media_name: str) -> tuple[str, str | None]:
+    source_item = Path(source_path) / media_name
+    if not source_item.is_file() or source_item.suffix.lower() not in VIDEO_EXT:
+        return media_name, None
+
+    normalized_name = source_item.stem
+    old_link_dir = Path(link_path) / media_name
+    new_link_dir = Path(link_path) / normalized_name
+    if old_link_dir == new_link_dir:
+        return normalized_name, None
+    if not old_link_dir.exists():
+        return normalized_name, f'old link directory not found for single-file movie: {old_link_dir}'
+    if new_link_dir.exists():
+        return normalized_name, f'target link directory already exists, not renamed: {new_link_dir}'
+    old_link_dir.rename(new_link_dir)
+    return normalized_name, f'renamed link directory: {old_link_dir.name} -> {new_link_dir.name}'
+
+
+def _preview_source_name(source_path: str, media_name: str, media_type: str) -> tuple[str, str | None]:
+    if media_type != "movie":
+        return media_name, None
+    source_item = Path(source_path) / media_name
+    if not source_item.is_file() or source_item.suffix.lower() not in VIDEO_EXT:
+        return media_name, None
+    normalized_name = source_item.stem
+    return normalized_name, f'single-file movie will use source_name: {normalized_name}'
+
+
 def _scan_media(source_name: str, link_path: str, media_type: str) -> tuple[str, int | None, str | None, int | None, str | None]:
     media_dir = Path(link_path) / source_name
     if media_type == "movie":
@@ -208,11 +237,14 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
             confirmed = 0
             pending = 0
             for media_name, _ in media_rows:
-                status, _, _, _, warn = _scan_media(media_name, link_path, media_type)
+                source_name, normalize_note = _preview_source_name(source_path, media_name, media_type)
+                status, _, _, _, warn = _scan_media(source_name, link_path, media_type)
                 if status == "confirmed":
                     confirmed += 1
                 else:
                     pending += 1
+                if normalize_note:
+                    warnings.append(f"{entry_name}/{media_name}: {normalize_note}")
                 if warn:
                     warnings.append(f"{entry_name}/{media_name}: {warn}")
             print(f"  {entry_name} ({media_type}): {len(media_rows)} items: confirmed {confirmed} / pending {pending}", flush=True)
@@ -260,7 +292,12 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
         print(f"  Migrating {entry_name} ({media_type}): {len(media_rows)} items", flush=True)
         for index, (media_name, date) in enumerate(media_rows, start=1):
             print(f"    [{index}/{len(media_rows)}] {media_name}", flush=True)
-            status, tmdb_id, generated_files, size, warn = _scan_media(media_name, link_path, media_type)
+            source_name = media_name
+            if media_type == "movie":
+                source_name, normalize_warn = _normalize_movie_source_name(source_path, link_path, media_name)
+                if normalize_warn:
+                    warnings.append(f"{entry_name}/{media_name}: {normalize_warn}")
+            status, tmdb_id, generated_files, size, warn = _scan_media(source_name, link_path, media_type)
             if warn:
                 warnings.append(f"{entry_name}/{media_name}: {warn}")
             if status == "confirmed" and not skip_thumbnails:
@@ -270,7 +307,7 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
             new.execute(
                 "INSERT INTO media (entry_id, source_name, date_added, scrape_status, tmdb_id, generated_files, size)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (entry_id, media_name, date, status, tmdb_id, generated_files, size),
+                (entry_id, source_name, date, status, tmdb_id, generated_files, size),
             )
             if status == "confirmed":
                 confirmed += 1
