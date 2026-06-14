@@ -4,11 +4,15 @@ from guessit import guessit
 from app.config import settings
 from app.core.nfo import write_episode_nfo
 from app.core.scanner import VIDEO_EXT
+from app.utils import httpx_client
 
 TMDB_BASE = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original"
 TMDB_THUMB_IMAGE_BASE = "https://image.tmdb.org/t/p/w185"
 
+
+class ArtworkDownloadError(RuntimeError):
+    pass
 
 
 def _headers() -> dict:
@@ -20,7 +24,7 @@ def search_tmdb(query: str, media_type: str, year: int | None = None, language: 
     params = {"query": query, "language": language}
     if year:
         params["year"] = year
-    with httpx.Client(proxy=proxy) as client:
+    with httpx_client(proxy, timeout=20) as client:
         r = client.get(f"{TMDB_BASE}/search/{endpoint}", params=params, headers=_headers())
         r.raise_for_status()
     results = r.json().get("results", [])[:5]
@@ -48,9 +52,14 @@ def _fetch_tmdb_poster(client: httpx.Client, tmdb_id: int, media_type: str, imag
     return None
 
 
+def fetch_tmdb_poster_path(tmdb_id: int, media_type: str, language: str = "en-US", proxy: str | None = None) -> str | None:
+    with httpx_client(proxy, timeout=20) as client:
+        return _fetch_tmdb_poster(client, tmdb_id, media_type, language)
+
+
 def fetch_tmdb_detail(tmdb_id: int, media_type: str, language: str = "zh-CN", image_language: str | None = None, proxy: str | None = None) -> dict:
     endpoint = "movie" if media_type == "movie" else "tv"
-    with httpx.Client(proxy=proxy) as client:
+    with httpx_client(proxy, timeout=20) as client:
         r = client.get(
             f"{TMDB_BASE}/{endpoint}/{tmdb_id}",
             params={"language": language},
@@ -90,19 +99,22 @@ def download_artwork(link_path: str, name: str, poster_path: str | None, backdro
     if skip_if_exists and (base / poster_name).exists():
         return []
     generated = []
-    with httpx.Client(proxy=proxy) as client:
-        if poster_path:
-            r = client.get(f"{TMDB_IMAGE_BASE}{poster_path}")
-            if r.status_code == 200:
+    try:
+        with httpx_client(proxy, timeout=45) as client:
+            if poster_path:
+                r = client.get(f"{TMDB_IMAGE_BASE}{poster_path}")
+                r.raise_for_status()
                 p = base / poster_name
                 p.write_bytes(r.content)
                 generated.append(str(p))
-        if backdrop_path:
-            r = client.get(f"{TMDB_IMAGE_BASE}{backdrop_path}")
-            if r.status_code == 200:
+            if backdrop_path:
+                r = client.get(f"{TMDB_IMAGE_BASE}{backdrop_path}")
+                r.raise_for_status()
                 p = base / fanart_name
                 p.write_bytes(r.content)
                 generated.append(str(p))
+    except httpx.HTTPError as e:
+        raise ArtworkDownloadError(f"Artwork download failed: {e}") from e
     return generated
 
 
@@ -115,18 +127,20 @@ def download_poster_thumbnail(link_path: str, name: str, poster_path: str | None
         return None
     thumb_path = get_poster_thumb_path(link_path, name)
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
-    with httpx.Client(proxy=proxy) as client:
-        r = client.get(f"{TMDB_THUMB_IMAGE_BASE}{poster_path}")
-        if r.status_code != 200:
-            return None
-        thumb_path.write_bytes(r.content)
+    try:
+        with httpx_client(proxy, timeout=30) as client:
+            r = client.get(f"{TMDB_THUMB_IMAGE_BASE}{poster_path}")
+            r.raise_for_status()
+            thumb_path.write_bytes(r.content)
+    except httpx.HTTPError as e:
+        raise ArtworkDownloadError(f"Poster thumbnail download failed: {e}") from e
     if not thumb_path.exists():
         return None
     return str(thumb_path)
 
 
 def fetch_tmdb_episode(tmdb_id: int, season: int, episode: int, language: str = "zh-CN", proxy: str | None = None) -> dict:
-    with httpx.Client(proxy=proxy) as client:
+    with httpx_client(proxy, timeout=20) as client:
         r = client.get(
             f"{TMDB_BASE}/tv/{tmdb_id}/season/{season}/episode/{episode}",
             params={"language": language},
@@ -151,7 +165,7 @@ def fetch_tmdb_episode(tmdb_id: int, season: int, episode: int, language: str = 
 def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str = "zh-CN", proxy: str | None = None) -> list[str]:
     base = Path(link_path) / name
     generated = []
-    with httpx.Client(proxy=proxy) as client:
+    with httpx_client(proxy, timeout=30) as client:
         for video_file in sorted(base.rglob("*")):
             if not video_file.is_file():
                 continue
@@ -181,10 +195,13 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
             if ep_data.get("still_path"):
                 thumb_path = video_file.with_name(video_file.stem + "-thumb.jpg")
                 if not thumb_path.exists():
-                    r = client.get(f"{TMDB_IMAGE_BASE}{ep_data['still_path']}")
-                    if r.status_code == 200:
+                    try:
+                        r = client.get(f"{TMDB_IMAGE_BASE}{ep_data['still_path']}")
+                        r.raise_for_status()
                         thumb_path.write_bytes(r.content)
                         generated.append(str(thumb_path))
+                    except httpx.HTTPError as e:
+                        raise ArtworkDownloadError(f"Episode thumbnail download failed: {e}") from e
     return generated
 
 

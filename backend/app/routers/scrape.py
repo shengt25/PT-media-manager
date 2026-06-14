@@ -5,7 +5,7 @@ from sqlmodel import Session
 from pydantic import BaseModel
 from app.db.database import get_session
 from app.db import crud
-from app.core.scraper import search_tmdb, fetch_tmdb_detail, download_artwork, download_poster_thumbnail, generate_episode_nfos
+from app.core.scraper import ArtworkDownloadError, search_tmdb, fetch_tmdb_detail, fetch_tmdb_poster_path, download_artwork, download_poster_thumbnail, generate_episode_nfos
 from app.core.nfo import write_movie_nfo, write_tvshow_nfo
 from app.core.scanner import find_main_video_stem
 
@@ -27,46 +27,49 @@ def _delete_generated_files(media):
 
 def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "zh-CN", image_language: str | None = None):
     proxy = crud.get_app_settings(session).tmdb_proxy
-    tmdb_data = fetch_tmdb_detail(tmdb_id, entry.media_type, language, image_language, proxy)
+    try:
+        tmdb_data = fetch_tmdb_detail(tmdb_id, entry.media_type, language, image_language, proxy)
 
-    if entry.media_type == "movie":
-        link_dir = Path(entry.link_path) / media.source_name
-        video_stem = find_main_video_stem(link_dir) or media.source_name
-        prefix = f"{video_stem}-"
-        folder_exists_with_artwork = (Path(entry.link_path) / media.source_name / f"{prefix}poster.jpg").exists()
-        generated = download_artwork(
-            entry.link_path, media.source_name,
-            tmdb_data.get("poster_path"),
-            tmdb_data.get("backdrop_path"),
-            skip_if_exists=folder_exists_with_artwork,
-            filename_prefix=prefix,
-            proxy=proxy,
-        )
-        thumb_path = download_poster_thumbnail(
-            entry.link_path,
-            media.source_name,
-            tmdb_data.get("poster_path"),
-            proxy=proxy,
-        )
-        nfo_path = write_movie_nfo(entry.link_path, media.source_name, video_stem, tmdb_data)
-        generated.append(nfo_path)
-    else:
-        generated = download_artwork(
-            entry.link_path, media.source_name,
-            tmdb_data.get("poster_path"),
-            tmdb_data.get("backdrop_path"),
-            proxy=proxy,
-        )
-        thumb_path = download_poster_thumbnail(
-            entry.link_path,
-            media.source_name,
-            tmdb_data.get("poster_path"),
-            proxy=proxy,
-        )
-        nfo_path = write_tvshow_nfo(entry.link_path, media.source_name, tmdb_data)
-        generated.append(nfo_path)
-        episode_nfos = generate_episode_nfos(entry.link_path, media.source_name, tmdb_id, language, proxy)
-        generated.extend(episode_nfos)
+        if entry.media_type == "movie":
+            link_dir = Path(entry.link_path) / media.source_name
+            video_stem = find_main_video_stem(link_dir) or media.source_name
+            prefix = f"{video_stem}-"
+            folder_exists_with_artwork = (Path(entry.link_path) / media.source_name / f"{prefix}poster.jpg").exists()
+            generated = download_artwork(
+                entry.link_path, media.source_name,
+                tmdb_data.get("poster_path"),
+                tmdb_data.get("backdrop_path"),
+                skip_if_exists=folder_exists_with_artwork,
+                filename_prefix=prefix,
+                proxy=proxy,
+            )
+            thumb_path = download_poster_thumbnail(
+                entry.link_path,
+                media.source_name,
+                tmdb_data.get("poster_path"),
+                proxy=proxy,
+            )
+            nfo_path = write_movie_nfo(entry.link_path, media.source_name, video_stem, tmdb_data)
+            generated.append(nfo_path)
+        else:
+            generated = download_artwork(
+                entry.link_path, media.source_name,
+                tmdb_data.get("poster_path"),
+                tmdb_data.get("backdrop_path"),
+                proxy=proxy,
+            )
+            thumb_path = download_poster_thumbnail(
+                entry.link_path,
+                media.source_name,
+                tmdb_data.get("poster_path"),
+                proxy=proxy,
+            )
+            nfo_path = write_tvshow_nfo(entry.link_path, media.source_name, tmdb_data)
+            generated.append(nfo_path)
+            episode_nfos = generate_episode_nfos(entry.link_path, media.source_name, tmdb_id, language, proxy)
+            generated.extend(episode_nfos)
+    except ArtworkDownloadError as e:
+        raise HTTPException(502, str(e))
 
     media.tmdb_id = tmdb_id
     media.scrape_status = "confirmed"
@@ -80,11 +83,8 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
 
 @router.get("/poster")
 def get_poster(tmdb_id: int, media_type: str, language: str = "en-US", session: Session = Depends(get_session)):
-    from app.core.scraper import _fetch_tmdb_poster
-    import httpx as _httpx
     proxy = crud.get_app_settings(session).tmdb_proxy
-    with _httpx.Client(proxy=proxy) as client:
-        path = _fetch_tmdb_poster(client, tmdb_id, media_type, language)
+    path = fetch_tmdb_poster_path(tmdb_id, media_type, language, proxy)
     return {"poster_path": path}
 
 
