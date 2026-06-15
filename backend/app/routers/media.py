@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session
 from app.db.database import engine, get_session
 from app.db import crud
-from app.core.nfo import read_nfo, read_episode_nfos
+from app.core.nfo import read_nfo
 
 router = APIRouter(prefix="/media", tags=["media"])
 
@@ -31,6 +31,11 @@ def list_media(entry_id: int, session: Session = Depends(get_session)):
         item = m.model_dump()
         if m.scrape_status in {"confirmed", "partial"}:
             item["metadata"] = read_nfo(m.generated_files, entry.media_type)
+        if m.scrape_detail:
+            detail = json.loads(m.scrape_detail)
+            item["incomplete"] = any(e["status"] != "matched" for e in detail)
+        else:
+            item["incomplete"] = False
         result.append(item)
     return result
 
@@ -65,4 +70,4 @@ def list_episodes(media_id: int, session: Session = Depends(get_session)):
     entry = crud.entry_get(session, media.entry_id)
     if entry.media_type != "tv":
         raise HTTPException(400, "Not a TV entry")
-    return read_episode_nfos(entry.link_path, media.source_name)
+    return json.loads(media.scrape_detail) if media.scrape_detail else []

@@ -16,25 +16,27 @@ interface Props {
 }
 
 function EpisodeList({ mediaId }: { mediaId: number }) {
-  const [episodes, setEpisodes] = useState<Episode[]>([])
+  const [entries, setEntries] = useState<Episode[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
     listEpisodes(mediaId)
-      .then(setEpisodes)
-      .catch(() => setEpisodes([]))
+      .then(setEntries)
+      .catch(() => setEntries([]))
       .finally(() => setLoading(false))
   }, [mediaId])
 
   if (loading) return <p className="text-xs text-muted-foreground py-2">Loading episodes…</p>
-  if (episodes.length === 0) return (
+  if (entries.length === 0) return (
     <p className="text-xs text-muted-foreground py-2">
       No episode data. Click Re-scrape → Full re-scrape to generate.
     </p>
   )
 
-  const seasons = [...new Set(episodes.map(e => e.season))].sort((a, b) => a - b)
+  const identified = entries.filter(e => e.season != null)
+  const unidentified = entries.filter(e => e.season == null)
+  const seasons = [...new Set(identified.map(e => e.season as number))].sort((a, b) => a - b)
 
   return (
     <div className="mt-4 pt-4 border-t space-y-3">
@@ -44,21 +46,42 @@ function EpisodeList({ mediaId }: { mediaId: number }) {
             Season {s}
           </p>
           <div className="space-y-0.5">
-            {episodes.filter(e => e.season === s).map(e => (
-              <div key={`${e.season}-${e.episode}`} className="flex items-baseline gap-2 py-0.5 text-sm">
-                <span className="text-muted-foreground w-8 shrink-0 font-mono text-xs">
-                  E{String(e.episode).padStart(2, '0')}
-                </span>
-                <span className="flex-1 truncate">{e.title ?? '-'}</span>
-                {e.aired && (
-                  <span className="text-xs text-muted-foreground shrink-0">{e.aired}</span>
-                )}
-              </div>
-            ))}
+            {identified
+              .filter(e => e.season === s)
+              .sort((a, b) => (a.episode ?? 0) - (b.episode ?? 0))
+              .map(e => (
+                <div key={`${e.season}-${e.episode}`} className="flex items-baseline gap-2 py-0.5 text-sm">
+                  <span className="text-muted-foreground w-8 shrink-0 font-mono text-xs">
+                    E{String(e.episode).padStart(2, '0')}
+                  </span>
+                  {e.status === 'no_tmdb_data' ? (
+                    <span className="flex-1 text-xs text-amber-700 dark:text-amber-300">No TMDB data</span>
+                  ) : (
+                    <span className="flex-1 truncate">{e.title ?? '-'}</span>
+                  )}
+                  {e.aired && (
+                    <span className="text-xs text-muted-foreground shrink-0">{e.aired}</span>
+                  )}
+                </div>
+              ))}
           </div>
           <Separator className="mt-2" />
         </div>
       ))}
+      {unidentified.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wider mb-1">
+            Unidentified files
+          </p>
+          <div className="space-y-0.5">
+            {unidentified.map(e => (
+              <div key={e.file} className="py-0.5 truncate font-mono text-xs text-muted-foreground">
+                {e.file}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

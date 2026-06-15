@@ -116,12 +116,13 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
     setConfirming(true)
     try {
       const imgLang = imageLanguage !== language ? imageLanguage : undefined
-      if (mode === 'rescrape') {
-        await rescrape(media.id, selected.tmdb_id, language, imgLang)
-      } else {
-        await confirmScrape(media.id, selected.tmdb_id, language, imgLang)
-      }
+      const result = mode === 'rescrape'
+        ? await rescrape(media.id, selected.tmdb_id, language, imgLang)
+        : await confirmScrape(media.id, selected.tmdb_id, language, imgLang)
       toast.success('Scraped successfully')
+      for (const warning of result.warnings) {
+        toast.warning(warning)
+      }
       onDone()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e))

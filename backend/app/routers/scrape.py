@@ -24,6 +24,7 @@ def _delete_generated_files(media):
 
 def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "zh-CN", image_language: str | None = None):
     proxy = crud.get_app_settings(session).tmdb_proxy
+    warnings: list[str] = []
     try:
         tmdb_data = fetch_tmdb_detail(tmdb_id, entry.media_type, language, image_language, proxy)
 
@@ -46,6 +47,10 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
             )
             nfo_path = write_movie_nfo(entry.link_path, media.source_name, video_stem, tmdb_data)
             generated.append(nfo_path)
+            scrape_detail = [{
+                "file": video_stem, "season": None, "episode": None,
+                "status": "matched", "title": tmdb_data.get("title"), "aired": None,
+            }]
         else:
             generated = download_artwork(
                 entry.link_path, media.source_name,
@@ -63,6 +68,8 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
             generated.append(nfo_path)
             episode_result = generate_episode_nfos(entry.link_path, media.source_name, tmdb_id, language, proxy)
             generated.extend(episode_result.generated)
+            scrape_detail = episode_result.scrape_detail
+            warnings = episode_result.warnings
     except ArtworkDownloadError as e:
         raise HTTPException(502, str(e))
 
@@ -75,7 +82,9 @@ def _run_scrape(media, entry, tmdb_id: int, session: Session, language: str = "z
     elif tmdb_data.get("poster_path"):
         raise HTTPException(502, "Poster thumbnail download failed")
     media.generated_files = json.dumps(generated)
-    return crud.media_update(session, media)
+    media.scrape_detail = json.dumps(scrape_detail)
+    crud.media_update(session, media)
+    return {"warnings": warnings}
 
 
 @router.get("/poster")
@@ -151,6 +160,13 @@ def sync_episodes(media_id: int, session: Session = Depends(get_session)):
     )
     existing = json.loads(media.generated_files) if media.generated_files else []
     media.generated_files = json.dumps(existing + episode_result.generated)
+
+    existing_detail = json.loads(media.scrape_detail) if media.scrape_detail else []
+    detail_by_file = {entry["file"]: entry for entry in existing_detail}
+    for entry in episode_result.scrape_detail:
+        detail_by_file[entry["file"]] = entry
+    media.scrape_detail = json.dumps(list(detail_by_file.values()))
+
     media.scrape_status = "confirmed"
     crud.media_update(session, media)
     added_nfos = len([path for path in episode_result.generated if path.endswith(".nfo")])

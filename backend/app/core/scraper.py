@@ -19,6 +19,7 @@ class ArtworkDownloadError(RuntimeError):
 class EpisodeNfoResult:
     generated: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    scrape_detail: list[dict] = field(default_factory=list)
 
 
 def _headers() -> dict:
@@ -228,12 +229,21 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
                 path = write_episode_nfo(video_file, {"title": video_file.stem})
                 result.generated.append(path)
                 result.warnings.append(f"Could not parse episode number: {rel}")
+                result.scrape_detail.append({
+                    "file": str(rel), "season": None, "episode": None,
+                    "status": "unidentified", "title": video_file.stem, "aired": None,
+                })
                 continue
             season, episode = numbers
             seasons.add(season)
             ep_data = fetch_tmdb_episode(tmdb_id, season, episode, language, proxy)
             path = write_episode_nfo(video_file, ep_data)
             result.generated.append(path)
+            status = "matched" if ep_data.get("tmdb_id") else "no_tmdb_data"
+            result.scrape_detail.append({
+                "file": str(rel), "season": season, "episode": episode,
+                "status": status, "title": ep_data.get("title"), "aired": ep_data.get("aired"),
+            })
             if ep_data.get("still_path"):
                 thumb_path = video_file.with_name(video_file.stem + "-thumb.jpg")
                 if not thumb_path.exists():

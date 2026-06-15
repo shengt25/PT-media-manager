@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react'
 import { type Entry } from '@/api/entries'
 import { type Media } from '@/api/media'
 import { cn } from '@/lib/utils'
@@ -81,6 +81,14 @@ function MediaCard({ media, selected, onClick }: { media: Media; selected: boole
           >
             {statusLabel(media.scrape_status)}
           </Badge>
+        )}
+        {media.incomplete && (
+          <div
+            className="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full border border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+            title="Some files are missing TMDB data"
+          >
+            <AlertTriangle className="size-3" />
+          </div>
         )}
       </div>
       <div className="min-h-20 p-2.5">

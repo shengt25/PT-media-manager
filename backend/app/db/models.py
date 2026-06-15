@@ -26,6 +26,7 @@ class Media(SQLModel, table=True):
     scrape_status:   str = Field(default="pending")  # 'pending' | 'confirmed' | 'partial'
     tmdb_id:         int | None = None
     generated_files: str | None = None  # JSON list of file paths created by scrape
+    scrape_detail:   str | None = None  # JSON array, one entry per video file: {file, season, episode, status, title, aired}
     size:            int | None = None  # bytes, sum of file sizes under link_path/source_name
     scrape_language: str | None = None
     image_language:  str | None = None

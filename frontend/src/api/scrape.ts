@@ -20,13 +20,13 @@ export const searchScrape = (mediaId: number, query: string, year?: number, lang
   })
 
 export const confirmScrape = (mediaId: number, tmdbId: number, language = 'zh-CN', imageLanguage?: string) =>
-  apiFetch<void>(`/scrape/${mediaId}/confirm`, {
+  apiFetch<{ warnings: string[] }>(`/scrape/${mediaId}/confirm`, {
     method: 'POST',
     body: JSON.stringify({ tmdb_id: tmdbId, language, image_language: imageLanguage }),
   })
 
 export const rescrape = (mediaId: number, tmdbId: number, language = 'zh-CN', imageLanguage?: string) =>
-  apiFetch<void>(`/scrape/${mediaId}/rescrape`, {
+  apiFetch<{ warnings: string[] }>(`/scrape/${mediaId}/rescrape`, {
     method: 'POST',
     body: JSON.stringify({ tmdb_id: tmdbId, language, image_language: imageLanguage }),
   })

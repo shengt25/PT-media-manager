@@ -11,16 +11,18 @@ export interface Media {
   size: number | null
   scrape_language: string | null
   image_language: string | null
+  scrape_detail: string | null
+  incomplete: boolean
   metadata?: Record<string, string>
 }
 
 export interface Episode {
-  season: number
-  episode: number
+  file: string
+  season: number | null
+  episode: number | null
+  status: 'matched' | 'no_tmdb_data' | 'unidentified'
   title: string | null
   aired: string | null
-  plot: string | null
-  rating: number | null
 }
 
 export const listMedia = (entryId: number) =>

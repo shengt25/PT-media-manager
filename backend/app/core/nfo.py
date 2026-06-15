@@ -83,30 +83,6 @@ def write_episode_nfo(video_path: Path, data: dict) -> str:
     return _write(nfo_path, root)
 
 
-def read_episode_nfos(link_path: str, name: str) -> list[dict]:
-    base = Path(link_path) / name
-    episodes = []
-    for nfo_path in sorted(base.rglob("*.nfo")):
-        try:
-            tree = ET.parse(nfo_path)
-            root = tree.getroot()
-        except ET.ParseError:
-            continue
-        if root.tag != "episodedetails":
-            continue
-        data = {el.tag: el.text for el in root if el.text}
-        episodes.append({
-            "season": int(data.get("season", 1)),
-            "episode": int(data.get("episode", 0)),
-            "title": data.get("title"),
-            "aired": data.get("aired"),
-            "plot": data.get("plot"),
-            "rating": float(data["rating"]) if data.get("rating") else None,
-        })
-    episodes.sort(key=lambda e: (e["season"], e["episode"]))
-    return episodes
-
-
 def read_nfo(generated_files: str | None, media_type: str) -> dict:
     nfo_path = _find_nfo_path(generated_files, media_type)
     if nfo_path is None or not nfo_path.exists():
