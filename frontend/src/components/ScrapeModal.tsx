@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { searchScrape, confirmScrape, rescrape, getPoster, type TmdbCandidate } from '@/api/scrape'
+import { searchScrape, confirmScrape, rescrape, getPoster, type TmdbCandidate, type ScrapeProgress } from '@/api/scrape'
 import { type Media } from '@/api/media'
 import { type Entry } from '@/api/entries'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
 const LANGUAGES = [
   { value: 'zh-CN', label: '中文' },
@@ -39,6 +42,7 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
   const [searching, setSearching] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [fetchingPoster, setFetchingPoster] = useState(false)
+  const [progress, setProgress] = useState<ScrapeProgress | null>(null)
 
   async function fetchPoster(tmdbId: number, mediaType: string, imgLang: string) {
     setFetchingPoster(true)
@@ -114,18 +118,40 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
   async function handleConfirm() {
     if (!media || !selected) return
     setConfirming(true)
+    setProgress(null)
     try {
       const imgLang = imageLanguage !== language ? imageLanguage : undefined
-      const result = mode === 'rescrape'
-        ? await rescrape(media.id, selected.tmdb_id, language, imgLang)
-        : await confirmScrape(media.id, selected.tmdb_id, language, imgLang)
-      toast.success('Scraped successfully')
-      for (const warning of result.warnings) {
-        toast.warning(warning)
+      if (mode === 'rescrape') {
+        await rescrape(media.id, selected.tmdb_id, language, imgLang)
+      } else {
+        await confirmScrape(media.id, selected.tmdb_id, language, imgLang)
       }
-      onDone()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e))
+      setConfirming(false)
+      return
+    }
+
+    const es = new EventSource(`${API_BASE}/scrape/${media.id}/progress`, { withCredentials: true })
+    es.onmessage = ev => {
+      const state: ScrapeProgress = JSON.parse(ev.data)
+      setProgress(state)
+      if (!state.done) return
+      es.close()
+      if (state.error) {
+        toast.error(state.error)
+      } else {
+        toast.success('Scraped successfully')
+        for (const warning of state.warnings) {
+          toast.warning(warning)
+        }
+        onDone()
+      }
+      setConfirming(false)
+    }
+    es.onerror = () => {
+      es.close()
+      toast.error('Lost connection to scrape progress')
       setConfirming(false)
     }
   }
@@ -245,11 +271,21 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
           </div>
 
           {/* footer */}
-          <div className="flex justify-end gap-2 px-5 py-3 border-t shrink-0">
-            <Button variant="outline" onClick={onClose}>Cancel</Button>
-            <Button onClick={handleConfirm} disabled={!selected || confirming}>
-              {confirming ? 'Confirming…' : 'Confirm'}
-            </Button>
+          <div className="flex flex-col gap-2 px-5 py-3 border-t shrink-0">
+            {confirming && (
+              <div className="space-y-1">
+                <Progress value={progress?.total ? (progress.current / progress.total) * 100 : null} />
+                <p className="text-xs text-muted-foreground">
+                  {progress?.total ? `Processing ${progress.current}/${progress.total}` : 'Starting…'}
+                </p>
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button onClick={handleConfirm} disabled={!selected || confirming}>
+                {confirming ? 'Confirming…' : 'Confirm'}
+              </Button>
+            </div>
           </div>
         </div>
       </DialogContent>

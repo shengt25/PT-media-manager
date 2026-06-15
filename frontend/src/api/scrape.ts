@@ -19,17 +19,25 @@ export const searchScrape = (mediaId: number, query: string, year?: number, lang
     body: JSON.stringify({ query, year, language }),
   })
 
+export interface ScrapeProgress {
+  current: number
+  total: number | null
+  done: boolean
+  warnings: string[]
+  error: string | null
+}
+
 export const confirmScrape = (mediaId: number, tmdbId: number, language = 'zh-CN', imageLanguage?: string) =>
-  apiFetch<{ warnings: string[] }>(`/scrape/${mediaId}/confirm`, {
+  apiFetch<{ status: string }>(`/scrape/${mediaId}/confirm`, {
     method: 'POST',
     body: JSON.stringify({ tmdb_id: tmdbId, language, image_language: imageLanguage }),
   })
 
 export const rescrape = (mediaId: number, tmdbId: number, language = 'zh-CN', imageLanguage?: string) =>
-  apiFetch<{ warnings: string[] }>(`/scrape/${mediaId}/rescrape`, {
+  apiFetch<{ status: string }>(`/scrape/${mediaId}/rescrape`, {
     method: 'POST',
     body: JSON.stringify({ tmdb_id: tmdbId, language, image_language: imageLanguage }),
   })
 
 export const syncEpisodes = (mediaId: number) =>
-  apiFetch<{ added: number; generated: number; warnings: string[] }>(`/scrape/${mediaId}/sync-episodes`, { method: 'POST' })
+  apiFetch<{ status: string }>(`/scrape/${mediaId}/sync-episodes`, { method: 'POST' })

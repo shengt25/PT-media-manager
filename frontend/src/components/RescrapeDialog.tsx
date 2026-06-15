@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { syncEpisodes } from '@/api/scrape'
+import { syncEpisodes, type ScrapeProgress } from '@/api/scrape'
 import { type Media } from '@/api/media'
 import { type Entry } from '@/api/entries'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
 interface Props {
   open: boolean
@@ -17,20 +20,40 @@ interface Props {
 
 export function RescrapeDialog({ open, media, entry, onClose, onFullRescrape, onSynced }: Props) {
   const [syncing, setSyncing] = useState(false)
+  const [progress, setProgress] = useState<ScrapeProgress | null>(null)
 
   async function handleSync() {
     if (!media) return
     setSyncing(true)
+    setProgress(null)
     try {
-      const result = await syncEpisodes(media.id)
-      toast.success(`Added ${result.added} episode NFO${result.added !== 1 ? 's' : ''}`)
-      for (const warning of result.warnings) {
-        toast.warning(warning)
-      }
-      onSynced()
+      await syncEpisodes(media.id)
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e))
-    } finally {
+      setSyncing(false)
+      return
+    }
+
+    const es = new EventSource(`${API_BASE}/scrape/${media.id}/progress`, { withCredentials: true })
+    es.onmessage = ev => {
+      const state: ScrapeProgress = JSON.parse(ev.data)
+      setProgress(state)
+      if (!state.done) return
+      es.close()
+      if (state.error) {
+        toast.error(state.error)
+      } else {
+        toast.success('Sync complete')
+        for (const warning of state.warnings) {
+          toast.warning(warning)
+        }
+        onSynced()
+      }
+      setSyncing(false)
+    }
+    es.onerror = () => {
+      es.close()
+      toast.error('Lost connection to scrape progress')
       setSyncing(false)
     }
   }
@@ -53,6 +76,14 @@ export function RescrapeDialog({ open, media, entry, onClose, onFullRescrape, on
             : 'This will delete all generated files and re-scrape.'}
         </div>
         <DialogFooter className="flex-col gap-2 sm:flex-col">
+          {canSync && syncing && (
+            <div className="space-y-1">
+              <Progress value={progress?.total ? (progress.current / progress.total) * 100 : null} />
+              <p className="text-xs text-muted-foreground">
+                {progress?.total ? `Scraping… ${progress.current}/${progress.total}` : 'Starting…'}
+              </p>
+            </div>
+          )}
           {canSync && (
             <Button
               variant="outline"

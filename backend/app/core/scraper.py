@@ -1,5 +1,6 @@
 import httpx
 from pathlib import Path
+from typing import Callable
 from dataclasses import dataclass, field
 from app.config import settings
 from app.core.episodes import infer_episode_numbers
@@ -20,6 +21,7 @@ class EpisodeNfoResult:
     generated: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     scrape_detail: list[dict] = field(default_factory=list)
+    pending_thumbnails: list[tuple[Path, str]] = field(default_factory=list)
 
 
 def _headers() -> dict:
@@ -208,7 +210,18 @@ def download_season_artwork(link_path: str, name: str, tmdb_id: int, seasons: se
     return generated
 
 
-def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str = "zh-CN", proxy: str | None = None) -> EpisodeNfoResult:
+def download_episode_thumbnails(client: httpx.Client, pending_thumbnails: list[tuple[Path, str]], result: EpisodeNfoResult) -> None:
+    for thumb_path, still_path in pending_thumbnails:
+        try:
+            r = client.get(f"{TMDB_IMAGE_BASE}{still_path}")
+            r.raise_for_status()
+            thumb_path.write_bytes(r.content)
+            result.generated.append(str(thumb_path))
+        except httpx.HTTPError as e:
+            result.warnings.append(f"Thumbnail download failed for {thumb_path.name}: {e}")
+
+
+def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str = "zh-CN", proxy: str | None = None, on_progress: Callable[[int, int], None] | None = None) -> EpisodeNfoResult:
     base = Path(link_path) / name
     result = EpisodeNfoResult()
     video_files = [
@@ -218,8 +231,12 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
     ]
     episode_numbers = infer_episode_numbers(video_files, base)
     seasons: set[int] = set()
+    sorted_files = sorted(video_files)
+    total = len(sorted_files)
     with _client(proxy, timeout=30) as client:
-        for video_file in sorted(video_files):
+        for i, video_file in enumerate(sorted_files, start=1):
+            if on_progress:
+                on_progress(i, total)
             nfo_path = video_file.with_suffix(".nfo")
             if nfo_path.exists():
                 continue
@@ -236,7 +253,11 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
                 continue
             season, episode = numbers
             seasons.add(season)
-            ep_data = fetch_tmdb_episode(tmdb_id, season, episode, language, proxy)
+            try:
+                ep_data = fetch_tmdb_episode(tmdb_id, season, episode, language, proxy)
+            except httpx.HTTPError as e:
+                result.warnings.append(f"Failed to fetch TMDB data for {rel}: {e}")
+                continue
             path = write_episode_nfo(video_file, ep_data)
             result.generated.append(path)
             status = "matched" if ep_data.get("tmdb_id") else "no_tmdb_data"
@@ -247,13 +268,8 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
             if ep_data.get("still_path"):
                 thumb_path = video_file.with_name(video_file.stem + "-thumb.jpg")
                 if not thumb_path.exists():
-                    try:
-                        r = client.get(f"{TMDB_IMAGE_BASE}{ep_data['still_path']}")
-                        r.raise_for_status()
-                        thumb_path.write_bytes(r.content)
-                        result.generated.append(str(thumb_path))
-                    except httpx.HTTPError as e:
-                        raise ArtworkDownloadError(f"Episode thumbnail download failed: {e}") from e
+                    result.pending_thumbnails.append((thumb_path, ep_data["still_path"]))
+        download_episode_thumbnails(client, result.pending_thumbnails, result)
     result.generated.extend(download_season_artwork(link_path, name, tmdb_id, seasons, language, proxy))
     return result
 
