@@ -4,7 +4,7 @@ from typing import Callable
 from dataclasses import dataclass, field
 from app.config import settings
 from app.core.episodes import infer_episode_numbers
-from app.core.nfo import write_episode_nfo
+from app.core.nfo import read_episode_nfo, write_episode_nfo
 from app.core.scanner import VIDEO_EXT
 
 TMDB_BASE = "https://api.themoviedb.org/3"
@@ -186,7 +186,15 @@ def fetch_tmdb_season(tmdb_id: int, season: int, language: str, proxy: str | Non
     return r.json()
 
 
-def download_season_artwork(link_path: str, name: str, tmdb_id: int, seasons: set[int], language: str, proxy: str | None = None) -> list[str]:
+def download_season_artwork(
+    link_path: str,
+    name: str,
+    tmdb_id: int,
+    seasons: set[int],
+    language: str,
+    proxy: str | None = None,
+    overwrite: bool = False,
+) -> list[str]:
     base = Path(link_path) / name
     generated: list[str] = []
     try:
@@ -199,7 +207,8 @@ def download_season_artwork(link_path: str, name: str, tmdb_id: int, seasons: se
                 if not poster_path:
                     continue
                 target = base / f"season{season:02d}-poster.jpg"
-                if target.exists():
+                if target.exists() and not overwrite:
+                    generated.append(str(target))
                     continue
                 r = client.get(f"{TMDB_IMAGE_BASE}{poster_path}")
                 r.raise_for_status()
@@ -221,7 +230,15 @@ def download_episode_thumbnails(client: httpx.Client, pending_thumbnails: list[t
             result.warnings.append(f"Thumbnail download failed for {thumb_path.name}: {e}")
 
 
-def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str = "zh-CN", proxy: str | None = None, on_progress: Callable[[int, int], None] | None = None) -> EpisodeNfoResult:
+def generate_episode_nfos(
+    link_path: str,
+    name: str,
+    tmdb_id: int,
+    language: str = "zh-CN",
+    proxy: str | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+    overwrite: bool = False,
+) -> EpisodeNfoResult:
     base = Path(link_path) / name
     result = EpisodeNfoResult()
     video_files = [
@@ -238,10 +255,34 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
             if on_progress:
                 on_progress(i, total)
             nfo_path = video_file.with_suffix(".nfo")
-            if nfo_path.exists():
-                continue
             rel = video_file.relative_to(base)
             numbers = episode_numbers.get(video_file)
+            thumb_path = video_file.with_name(video_file.stem + "-thumb.jpg")
+
+            if numbers is not None:
+                seasons.add(numbers[0])
+
+            if nfo_path.exists() and not overwrite:
+                nfo_data = read_episode_nfo(nfo_path)
+                if nfo_data is not None:
+                    try:
+                        parsed_numbers = (int(nfo_data["season"]), int(nfo_data["episode"]))
+                    except (KeyError, TypeError, ValueError):
+                        parsed_numbers = (None, None)
+                        status = "unidentified"
+                    if parsed_numbers[0] is not None:
+                        seasons.add(parsed_numbers[0])
+                        status = "matched" if nfo_data["has_uniqueid"] else "no_tmdb_data"
+                    result.generated.append(str(nfo_path))
+                    if thumb_path.exists():
+                        result.generated.append(str(thumb_path))
+                    result.scrape_detail.append({
+                        "file": str(rel), "season": parsed_numbers[0], "episode": parsed_numbers[1],
+                        "status": status, "title": nfo_data.get("title"), "aired": nfo_data.get("aired"),
+                    })
+                    continue
+                result.warnings.append(f"Invalid existing NFO, regenerating: {nfo_path.name}")
+
             if numbers is None:
                 path = write_episode_nfo(video_file, {"title": video_file.stem})
                 result.generated.append(path)
@@ -252,7 +293,6 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
                 })
                 continue
             season, episode = numbers
-            seasons.add(season)
             try:
                 ep_data = fetch_tmdb_episode(tmdb_id, season, episode, language, proxy)
             except httpx.HTTPError as e:
@@ -266,11 +306,13 @@ def generate_episode_nfos(link_path: str, name: str, tmdb_id: int, language: str
                 "status": status, "title": ep_data.get("title"), "aired": ep_data.get("aired"),
             })
             if ep_data.get("still_path"):
-                thumb_path = video_file.with_name(video_file.stem + "-thumb.jpg")
-                if not thumb_path.exists():
+                if overwrite or not thumb_path.exists():
                     result.pending_thumbnails.append((thumb_path, ep_data["still_path"]))
         download_episode_thumbnails(client, result.pending_thumbnails, result)
-    result.generated.extend(download_season_artwork(link_path, name, tmdb_id, seasons, language, proxy))
+    result.generated.extend(
+        download_season_artwork(link_path, name, tmdb_id, seasons, language, proxy, overwrite=overwrite)
+    )
+    result.generated = list(dict.fromkeys(result.generated))
     return result
 
 

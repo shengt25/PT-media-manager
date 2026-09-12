@@ -199,6 +199,60 @@ def _scan_media(source_name: str, link_path: str, media_type: str) -> tuple[str,
     return "confirmed", tmdb_id, json.dumps(generated), size, None
 
 
+def _read_episode_detail(video_file: Path, media_dir: Path) -> dict:
+    rel = video_file.relative_to(media_dir)
+    nfo_path = video_file.with_suffix(".nfo")
+    data: dict[str, str] = {}
+    has_uniqueid = False
+    if nfo_path.exists():
+        try:
+            root = ET.parse(nfo_path).getroot()
+            data = {el.tag: el.text for el in root if el.text}
+            uniqueid = root.find("uniqueid")
+            has_uniqueid = uniqueid is not None and bool(uniqueid.text)
+        except (ET.ParseError, OSError):
+            pass
+
+    try:
+        season = int(data["season"])
+        episode = int(data["episode"])
+    except (KeyError, TypeError, ValueError):
+        return {
+            "file": str(rel), "season": None, "episode": None,
+            "status": "unidentified", "title": data.get("title", video_file.stem), "aired": None,
+        }
+
+    return {
+        "file": str(rel), "season": season, "episode": episode,
+        "status": "matched" if has_uniqueid else "no_tmdb_data",
+        "title": data.get("title"), "aired": data.get("aired"),
+    }
+
+
+def _build_scrape_detail(source_name: str, link_path: str, media_type: str) -> str:
+    media_dir = Path(link_path) / source_name
+    if media_type == "movie":
+        nfo_candidates = list(media_dir.glob("*.nfo")) if media_dir.exists() else []
+        title = None
+        if nfo_candidates:
+            try:
+                root = ET.parse(nfo_candidates[0]).getroot()
+                title = root.findtext("title")
+            except (ET.ParseError, OSError):
+                pass
+        detail = [{
+            "file": source_name, "season": None, "episode": None,
+            "status": "matched", "title": title, "aired": None,
+        }]
+    else:
+        video_files = sorted(
+            path for path in media_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in VIDEO_EXT
+        ) if media_dir.exists() else []
+        detail = [_read_episode_detail(path, media_dir) for path in video_files]
+    return json.dumps(detail)
+
+
 def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None, tmdb_proxy: str | None = None, skip_thumbnails: bool = False):
     if not old_db.exists():
         print(f"Error: old database not found: {old_db}")
@@ -299,9 +353,13 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
                 generated_files, thumb_warn = _ensure_poster_thumb(tmdb_id, media_type, generated_files, tmdb_api_key, tmdb_proxy)
                 if thumb_warn:
                     warnings.append(f"{entry_name}/{media_name}: {thumb_warn}")
+            scrape_detail = (
+                _build_scrape_detail(source_name, link_path, media_type)
+                if status == "confirmed" else None
+            )
             new.execute(
-                "INSERT INTO media (entry_id, source_name, date_added, scrape_status, tmdb_id, generated_files, size, scrape_language, image_language)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO media (entry_id, source_name, date_added, scrape_status, tmdb_id, generated_files, size, scrape_language, image_language, scrape_detail)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     entry_id,
                     source_name,
@@ -312,6 +370,7 @@ def migrate(old_db: Path, dry_run: bool = False, tmdb_api_key: str | None = None
                     size,
                     "zh-CN" if status == "confirmed" else None,
                     "zh-CN" if status == "confirmed" else None,
+                    scrape_detail,
                 ),
             )
             if status == "confirmed":
@@ -354,7 +413,8 @@ def _create_schema(conn: sqlite3.Connection):
             generated_files TEXT,
             size            INTEGER,
             scrape_language TEXT,
-            image_language  TEXT
+            image_language  TEXT,
+            scrape_detail   TEXT
         );
     """)
 

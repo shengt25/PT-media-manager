@@ -83,6 +83,19 @@ def write_episode_nfo(video_path: Path, data: dict) -> str:
     return _write(nfo_path, root)
 
 
+def read_episode_nfo(nfo_path: Path) -> dict | None:
+    """Read the fields needed to rebuild a persisted episode scrape result."""
+    try:
+        root = ET.parse(nfo_path).getroot()
+    except (ET.ParseError, OSError):
+        return None
+
+    data = {el.tag: el.text for el in root if el.text}
+    uniqueid = root.find("uniqueid")
+    data["has_uniqueid"] = uniqueid is not None and bool(uniqueid.text)
+    return data
+
+
 def read_nfo(generated_files: str | None, media_type: str) -> dict:
     nfo_path = _find_nfo_path(generated_files, media_type)
     if nfo_path is None or not nfo_path.exists():

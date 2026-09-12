@@ -9,3 +9,4 @@ backend/data/
 deploy/.env
 frontend/dist/
 .ptmm-install
+/ptmm.db

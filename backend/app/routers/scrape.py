@@ -27,7 +27,7 @@ def _delete_generated_files(media):
             p.unlink()
 
 
-def _run_scrape_job(media_id: int, tmdb_id: int, language: str, image_language: str | None):
+def _run_scrape_job(media_id: int, tmdb_id: int, language: str, image_language: str | None, overwrite: bool = False):
     progress = _progress[media_id]
     try:
         with Session(engine) as session:
@@ -78,6 +78,7 @@ def _run_scrape_job(media_id: int, tmdb_id: int, language: str, image_language: 
                 episode_result = generate_episode_nfos(
                     entry.link_path, media.source_name, tmdb_id, language, proxy,
                     on_progress=lambda i, t: progress.update(current=i, total=t),
+                    overwrite=overwrite,
                 )
                 generated.extend(episode_result.generated)
                 scrape_detail = episode_result.scrape_detail
@@ -91,7 +92,7 @@ def _run_scrape_job(media_id: int, tmdb_id: int, language: str, image_language: 
                 generated.append(thumb_path)
             elif tmdb_data.get("poster_path"):
                 raise ArtworkDownloadError("Poster thumbnail download failed")
-            media.generated_files = json.dumps(generated)
+            media.generated_files = json.dumps(list(dict.fromkeys(generated)))
             media.scrape_detail = json.dumps(scrape_detail)
             crud.media_update(session, media)
     except Exception as e:
@@ -112,7 +113,7 @@ def _run_sync_episodes_job(media_id: int):
                 on_progress=lambda i, t: progress.update(current=i, total=t),
             )
             existing = json.loads(media.generated_files) if media.generated_files else []
-            media.generated_files = json.dumps(existing + episode_result.generated)
+            media.generated_files = json.dumps(list(dict.fromkeys(existing + episode_result.generated)))
 
             existing_detail = json.loads(media.scrape_detail) if media.scrape_detail else []
             detail_by_file = {item["file"]: item for item in existing_detail}
@@ -201,7 +202,7 @@ def rescrape(media_id: int, data: ConfirmRequest, background_tasks: BackgroundTa
         "warnings": [],
         "error": None,
     }
-    background_tasks.add_task(_run_scrape_job, media_id, data.tmdb_id, data.language, data.image_language)
+    background_tasks.add_task(_run_scrape_job, media_id, data.tmdb_id, data.language, data.image_language, True)
     return {"status": "started"}
 
 
