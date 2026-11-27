@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
-    image: ptmm-backend
+    image: ghcr.io/shengt25/ptmm-backend:latest
     user: "${PUID:-1000}:${PGID:-1000}"
     init: true
     environment:
@@ -42,7 +42,7 @@ services:
     build:
       context: .
       dockerfile: docker/web.Dockerfile
-    image: ptmm-web
+    image: ghcr.io/shengt25/ptmm-web:latest
     depends_on:
       backend:
         condition: service_healthy
