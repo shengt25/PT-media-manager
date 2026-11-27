@@ -1,0 +1,17 @@
+.git
+.idea
+.DS_Store
+.env
+.ptmm-install
+ptmm.db
+docker-data
+backend/.env
+backend/.venv
+backend/.pytest_cache
+backend/data
+backend/*.egg-info
+backend/__pycache__
+frontend/node_modules
+frontend/dist
+
+.claude
