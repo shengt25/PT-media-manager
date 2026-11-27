@@ -66,7 +66,12 @@ vim .env                 # TMDB key, MEDIA_DISK_MOUNT, CERT_DIR, HTTPS_PORT
   `ghcr.io/shengt25/ptmm-web` (`latest`), which GitHub Actions builds for
   linux/amd64 on every `v*` tag. `./up.sh --build` builds them from the
   checkout instead. Either way it then removes the dangling old images.
-
+- **Network and ports**: both containers use the host's network. nginx serves
+  `HTTPS_PORT` (default 8443); the backend listens on `127.0.0.1:BACKEND_PORT`
+  (default 8000), reachable only from the host, for nginx. Set `BACKEND_PORT`
+  in `.env` if 8000 is taken. Because `127.0.0.1` in the containers is the
+  host, a TMDB proxy running on the host is entered in Settings as usual, e.g.
+  `http://127.0.0.1:7890`.
 - **User and data**: `up.sh` runs the backend as the invoking user
   (`SUDO_UID`/`SUDO_GID` under `sudo`) and keeps the database plus its
   rotating backups in `~/.config/ptmm`. Override with `PUID`/`PGID`/`DATA_DIR`

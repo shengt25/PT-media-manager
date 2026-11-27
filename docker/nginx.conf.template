@@ -1,12 +1,14 @@
 # Rendered by the nginx image's entrypoint (envsubst) into
-# /etc/nginx/conf.d/default.conf. Only ${CERT_*} are substituted — nginx's own
-# $variables are left alone (see NGINX_ENVSUBST_FILTER in web.Dockerfile).
+# /etc/nginx/conf.d/default.conf. Only ${CERT_*}, ${HTTPS_PORT} and
+# ${BACKEND_PORT} are substituted — nginx's own $variables are left alone (see
+# NGINX_ENVSUBST_FILTER in web.Dockerfile).
 
 limit_req_zone $binary_remote_addr zone=ptmm_login:10m rate=5r/m;
 
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
+    listen ${HTTPS_PORT} ssl;
+    # Dropped at startup on hosts without IPv6 (see ipv6-listen.sh).
+    listen [::]:${HTTPS_PORT} ssl;
     http2 on;
     server_name _;
 
@@ -25,7 +27,7 @@ server {
     # Login rate limit only; regular API calls may be bursty during page loads.
     location = /api/auth/login {
         limit_req zone=ptmm_login burst=5 nodelay;
-        proxy_pass http://backend:8000/auth/login;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT}/auth/login;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -37,7 +39,7 @@ server {
     # API reverse proxy (strips /api prefix). Buffering off for the scrape
     # progress SSE stream.
     location /api/ {
-        proxy_pass http://backend:8000/;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
