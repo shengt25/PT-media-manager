@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { searchScrape, confirmScrape, rescrape, getPoster, type TmdbCandidate, type ScrapeProgress } from '@/api/scrape'
 import { type Media } from '@/api/media'
@@ -40,6 +40,10 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
   const [imageLanguage, setImageLanguage] = useState('zh-CN')
   const [previewPoster, setPreviewPoster] = useState<string | null>(null)
   const [searching, setSearching] = useState(false)
+  // Whether a search has run since the modal opened, to tell "no results"
+  // apart from "not searched yet".
+  const [searched, setSearched] = useState(false)
+  const queryRef = useRef<HTMLInputElement>(null)
   const [confirming, setConfirming] = useState(false)
   const [fetchingPoster, setFetchingPoster] = useState(false)
   const [progress, setProgress] = useState<ScrapeProgress | null>(null)
@@ -70,19 +74,11 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
     setSelected(null)
     setPreviewPoster(null)
     setConfirming(false)
-
-    const title = media.source_name.replace(/[._]/g, ' ').trim()
-    setQuery(title)
-    setSearching(true)
-    searchScrape(media.id, title, undefined, language)
-      .then(results => {
-        setCandidates(results)
-        if (results.length === 1) selectCandidate(results[0], imageLanguage)
-      })
-      .catch(e => toast.error(e.message))
-      .finally(() => setSearching(false))
-    // Intentionally only reset/search when the modal opens for a (possibly new) media item,
-    // not on every language/imageLanguage change.
+    setSearched(false)
+    // Prefill only: release names are often too noisy to match, so the user
+    // trims the query and searches themselves.
+    setQuery(media.source_name.replace(/[._]/g, ' ').trim())
+    // Intentionally only reset when the modal opens for a (possibly new) media item.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, media?.id])
 
@@ -108,6 +104,8 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
     try {
       const results = await searchScrape(media.id, query, undefined, language)
       setCandidates(results)
+      setSearched(true)
+      if (results.length === 1) selectCandidate(results[0], imageLanguage)
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e))
     } finally {
@@ -161,7 +159,7 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-4xl sm:max-w-4xl p-0 overflow-hidden" showCloseButton={false}>
+      <DialogContent className="max-w-4xl sm:max-w-4xl p-0 overflow-hidden" showCloseButton={false} initialFocus={queryRef}>
         <div className="flex flex-col h-[600px]">
           {/* header */}
           <div className="flex items-center justify-between px-5 py-3 border-b shrink-0">
@@ -182,6 +180,7 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
                 </SelectContent>
               </Select>
               <Input
+                ref={queryRef}
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 placeholder="Search TMDB…"
@@ -201,7 +200,9 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
               <ScrollArea className="flex-1">
                 <div className="p-2 space-y-1">
                   {candidates.length === 0 && !searching && (
-                    <p className="text-sm text-muted-foreground text-center py-6">No results.</p>
+                    <p className="text-sm text-muted-foreground text-center py-6 px-3">
+                      {searched ? 'No results.' : 'Press Enter or Search to look up TMDB.'}
+                    </p>
                   )}
                   {candidates.map(c => (
                     <button
