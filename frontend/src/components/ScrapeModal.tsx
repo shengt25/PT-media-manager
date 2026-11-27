@@ -201,7 +201,7 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
                 <div className="p-2 space-y-1">
                   {candidates.length === 0 && !searching && (
                     <p className="text-sm text-muted-foreground text-center py-6 px-3">
-                      {searched ? 'No results.' : 'Trim the title above, then press Enter or Search.'}
+                      {searched ? 'No results.' : 'Press Enter or Search to look up TMDB.'}
                     </p>
                   )}
                   {candidates.map(c => (
