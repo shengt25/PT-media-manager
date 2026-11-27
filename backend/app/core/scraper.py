@@ -32,6 +32,20 @@ def _client(proxy: str | None, timeout: int) -> httpx.Client:
     return httpx.Client(proxy=proxy, timeout=timeout)
 
 
+def describe_http_error(e: httpx.HTTPError) -> str:
+    """A message for the UI, in place of httpx's bare one."""
+    if isinstance(e, httpx.HTTPStatusError):
+        code = e.response.status_code
+        if code == 401:
+            return "TMDB rejected the API key (401): check TMDB_API_KEY"
+        return f"TMDB returned HTTP {code} for {e.request.url.path}"
+    if isinstance(e, httpx.TimeoutException):
+        return f"TMDB request timed out ({type(e).__name__}): check the network or the proxy in Settings"
+    if isinstance(e, (httpx.ConnectError, httpx.ProxyError)):
+        return f"Could not reach TMDB: {e}. Check the network or the proxy in Settings"
+    return f"TMDB request failed: {e}"
+
+
 def search_tmdb(query: str, media_type: str, year: int | None = None, language: str = "zh-CN", proxy: str | None = None) -> list[dict]:
     endpoint = "movie" if media_type == "movie" else "tv"
     params = {"query": query, "language": language}

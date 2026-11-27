@@ -1,5 +1,6 @@
 import asyncio
 import json
+import httpx
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -7,7 +8,7 @@ from sqlmodel import Session
 from pydantic import BaseModel
 from app.db.database import engine, get_session
 from app.db import crud
-from app.core.scraper import ArtworkDownloadError, search_tmdb, fetch_tmdb_detail, fetch_tmdb_poster_path, download_artwork, download_poster_thumbnail, generate_episode_nfos
+from app.core.scraper import ArtworkDownloadError, describe_http_error, search_tmdb, fetch_tmdb_detail, fetch_tmdb_poster_path, download_artwork, download_poster_thumbnail, generate_episode_nfos
 from app.core.nfo import write_movie_nfo, write_tvshow_nfo
 from app.core.scanner import find_main_video_stem
 
@@ -95,6 +96,8 @@ def _run_scrape_job(media_id: int, tmdb_id: int, language: str, image_language: 
             media.generated_files = json.dumps(list(dict.fromkeys(generated)))
             media.scrape_detail = json.dumps(scrape_detail)
             crud.media_update(session, media)
+    except httpx.HTTPError as e:
+        progress["error"] = describe_http_error(e)
     except Exception as e:
         progress["error"] = str(e)
     finally:
@@ -124,6 +127,8 @@ def _run_sync_episodes_job(media_id: int):
             media.scrape_status = "confirmed"
             crud.media_update(session, media)
             progress["warnings"] = episode_result.warnings
+    except httpx.HTTPError as e:
+        progress["error"] = describe_http_error(e)
     except Exception as e:
         progress["error"] = str(e)
     finally:

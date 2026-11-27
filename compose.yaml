@@ -1,5 +1,10 @@
 # Start with ./up.sh rather than `docker compose up` directly: it fills in
 # PUID/PGID/DATA_DIR from the invoking user and validates .env first.
+#
+# Both services use the host's network, so 127.0.0.1 inside them is the host:
+# a TMDB proxy on the host is set as http://127.0.0.1:<port>, as without
+# Docker. The backend listens on 127.0.0.1:BACKEND_PORT only; nginx serves
+# HTTPS_PORT and forwards /api to it.
 services:
   backend:
     build:
@@ -8,8 +13,10 @@ services:
     image: ghcr.io/shengt25/ptmm-backend:latest
     user: "${PUID:-1000}:${PGID:-1000}"
     init: true
+    network_mode: host
     environment:
       HOME: /tmp
+      BACKEND_PORT: "${BACKEND_PORT:-8000}"
       DB_PATH: /data/ptmm.db
       TMDB_API_KEY: "${TMDB_API_KEY}"
       AUTH_ENABLED: "${AUTH_ENABLED:-false}"
@@ -29,9 +36,13 @@ services:
       - -c
       - |
         umask "$${UMASK}"
-        exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+        exec uvicorn app.main:app --host 127.0.0.1 --port "$${BACKEND_PORT}" --workers 1
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=2)"]
+      test:
+        - CMD
+        - python
+        - -c
+        - import os, urllib.request; urllib.request.urlopen(f"http://127.0.0.1:{os.environ['BACKEND_PORT']}/openapi.json", timeout=2)
       interval: 15s
       timeout: 5s
       retries: 5
@@ -46,9 +57,10 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    ports:
-      - "${HTTPS_PORT:-8443}:443"
+    network_mode: host
     environment:
+      HTTPS_PORT: "${HTTPS_PORT:-8443}"
+      BACKEND_PORT: "${BACKEND_PORT:-8000}"
       CERT_FULLCHAIN_FILE: "${CERT_FULLCHAIN_FILE:-fullchain.pem}"
       CERT_KEY_FILE: "${CERT_KEY_FILE:-privkey.pem}"
       CERT_RELOAD_INTERVAL: "${CERT_RELOAD_INTERVAL:-3600}"

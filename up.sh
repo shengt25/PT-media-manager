@@ -81,6 +81,17 @@ for key in PUID PGID; do
 done
 [[ "$UMASK" =~ ^[0-7]{3,4}$ ]] || die "UMASK must be an octal value such as 002 or 0022"
 
+# Both services run on the host's network, so these are host ports.
+HTTPS_PORT="$(env_or_file HTTPS_PORT)"
+BACKEND_PORT="$(env_or_file BACKEND_PORT)"
+HTTPS_PORT="${HTTPS_PORT:-8443}"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+for key in HTTPS_PORT BACKEND_PORT; do
+    [[ "${!key}" =~ ^[0-9]+$ ]] && (( ${!key} >= 1 && ${!key} <= 65535 )) \
+        || die "$key must be a port number: ${!key}"
+done
+[[ "$HTTPS_PORT" != "$BACKEND_PORT" ]] || die "HTTPS_PORT and BACKEND_PORT must differ"
+
 for key in TMDB_API_KEY MEDIA_DISK_MOUNT CERT_DIR; do
     [[ -n "${!key}" ]] || die "$key must be set in .env or the environment"
 done
@@ -126,13 +137,14 @@ if [[ -e "$DATA_DIR/ptmm.db" ]]; then
     [[ "$owner" == "$PUID" ]] || die "$DATA_DIR/ptmm.db is owned by uid $owner, expected $PUID (chown it, or set PUID)"
 fi
 
-export PUID PGID UMASK DATA_DIR CERT_FULLCHAIN_FILE CERT_KEY_FILE
+export PUID PGID UMASK DATA_DIR CERT_FULLCHAIN_FILE CERT_KEY_FILE HTTPS_PORT BACKEND_PORT
 
 echo "Starting PT Media Manager"
 echo "  Backend UID:GID  $PUID:$PGID"
 echo "  Media disk       $MEDIA_DISK_MOUNT"
 echo "  Database dir     $DATA_DIR"
 echo "  Certificates     $CERT_DIR ($CERT_FULLCHAIN_FILE, $CERT_KEY_FILE)"
+echo "  Ports            HTTPS $HTTPS_PORT, backend 127.0.0.1:$BACKEND_PORT"
 
 cd "$PROJECT_ROOT"
 docker compose config --quiet

@@ -1,6 +1,8 @@
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
+import httpx
+from fastapi import FastAPI, Depends, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import init_db
 from app.routers import entries, media, scan, scrape, settings as settings_router
@@ -8,6 +10,7 @@ from app.routers import auth as auth_router
 from app.core.auth import verify_token
 from app.core.backup import run_backup, _needs_backup
 from app.config import settings
+from app.core.scraper import describe_http_error
 
 BACKUP_CHECK_INTERVAL = 24 * 3600
 
@@ -41,6 +44,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
+@app.exception_handler(httpx.HTTPError)
+async def tmdb_error_handler(request: Request, exc: httpx.HTTPError):
+    # An upstream (TMDB or proxy) failure, not a bug here: 502 with a readable
+    # reason, which the frontend shows as is.
+    return JSONResponse(status_code=502, content={"detail": describe_http_error(exc)})
+
 
 # Auth router must be publicly accessible
 app.include_router(auth_router.router)
