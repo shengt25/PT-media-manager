@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { searchScrape, confirmScrape, rescrape, getPoster, type TmdbCandidate, type ScrapeProgress } from '@/api/scrape'
 import { type Media } from '@/api/media'
@@ -97,8 +98,9 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
   }
 
   async function handleSearch() {
-    if (!media) return
+    if (!media || searching) return
     setSearching(true)
+    setCandidates([])
     setSelected(null)
     setPreviewPoster(null)
     try {
@@ -188,7 +190,7 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
               />
               <Button size="sm" variant="outline" onClick={handleSearch} disabled={searching} className="shrink-0">
-                {searching ? '…' : 'Search'}
+                Search
               </Button>
             </div>
           </div>
@@ -199,6 +201,12 @@ export function ScrapeModal({ open, media, entry, onClose, onDone, mode = 'confi
             <div className="w-72 shrink-0 border-r flex flex-col">
               <ScrollArea className="flex-1">
                 <div className="p-2 space-y-1">
+                  {searching && (
+                    <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin" />
+                      Searching…
+                    </div>
+                  )}
                   {candidates.length === 0 && !searching && (
                     <p className="text-sm text-muted-foreground text-center py-6 px-3">
                       {searched ? 'No results.' : 'Press Enter or Search to look up TMDB.'}
