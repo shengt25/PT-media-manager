@@ -75,12 +75,24 @@ done
 [[ "$TMDB_API_KEY" != replace-with-* ]] || die "TMDB_API_KEY is still the placeholder from .env.example"
 
 [[ -d "$MEDIA_DISK_MOUNT" ]] || die "MEDIA_DISK_MOUNT is not a directory: $MEDIA_DISK_MOUNT"
-[[ -d "$CERT_DIR" ]] || die "CERT_DIR is not a directory: $CERT_DIR"
-# Existence only: the key is typically root-only, which is fine — nginx's
-# master process reads it as root inside the container.
-for f in "$CERT_FULLCHAIN_FILE" "$CERT_KEY_FILE"; do
-    [[ -e "$CERT_DIR/$f" ]] || die "certificate file not found: $CERT_DIR/$f"
-done
+# Cert dirs are often root-only (e.g. /etc/nginx/certs), which is fine: Docker
+# mounts them as root and nginx's master process reads them as root. So only
+# check what we can see — directly, or via sudo if it needs no password.
+cert_test() {
+    test "$@" 2>/dev/null || sudo -n test "$@" 2>/dev/null
+}
+if cert_test -d "$CERT_DIR"; then
+    for f in "$CERT_FULLCHAIN_FILE" "$CERT_KEY_FILE"; do
+        cert_test -e "$CERT_DIR/$f" || die "certificate file not found: $CERT_DIR/$f"
+    done
+elif sudo test -d "$CERT_DIR" 2>/dev/null; then
+    # Password-protected sudo: ask once rather than failing the check.
+    for f in "$CERT_FULLCHAIN_FILE" "$CERT_KEY_FILE"; do
+        sudo test -e "$CERT_DIR/$f" || die "certificate file not found: $CERT_DIR/$f"
+    done
+else
+    die "CERT_DIR not found (checked as $(whoami) and with sudo): $CERT_DIR"
+fi
 
 if [[ "$AUTH_ENABLED" == "true" ]]; then
     for key in AUTH_USERNAME AUTH_PASSWORD_HASH JWT_SECRET; do
