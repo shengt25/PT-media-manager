@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Prints AUTH_PASSWORD_HASH / JWT_SECRET lines to paste into .env, computed
-# inside the backend image so the host needs nothing but Docker.
+# Prints AUTH_PASSWORD_HASH / JWT_SECRET lines to paste into config.env,
+# computed inside the backend image so the host needs nothing but Docker.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=docker/config-dir.sh
+source "$PROJECT_ROOT/docker/config-dir.sh"
 
 read -rsp "Password for the PT Media Manager login: " password
 echo ""
@@ -16,6 +18,7 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1 \
     docker build -q -f "$PROJECT_ROOT/docker/backend.Dockerfile" -t "$IMAGE" "$PROJECT_ROOT" >/dev/null
 fi
 
+echo "Paste these lines into $CONFIG_FILE (keep the single quotes):" >&2
 # Password goes in over stdin, never on a command line.
 printf '%s' "$password" | docker run --rm -i "$IMAGE" python -c '
 import bcrypt, secrets, sys

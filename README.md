@@ -32,9 +32,10 @@ frontend/       React frontend
 backend/        FastAPI backend
 docker/         backend/frontend images and nginx configuration
 compose.yaml    container definitions
-up.sh           validated pull/start helper
-gen-auth.sh     generates AUTH_PASSWORD_HASH / JWT_SECRET for .env
-.env.example    configuration template
+up.sh               validated pull/start helper
+compose.sh          docker compose with the deployed config (logs, ps, down)
+gen-auth.sh         generates AUTH_PASSWORD_HASH / JWT_SECRET for config.env
+config.env.example  configuration template
 ```
 
 ## Quick start (development)
@@ -56,11 +57,20 @@ npm run dev            # http://localhost:5173
 Needs only Docker with the Compose plugin on the server.
 
 ```bash
-cp .env.example .env
-vim .env                 # TMDB key, MEDIA_DISK_MOUNT, CERT_DIR, HTTPS_PORT
-./gen-auth.sh            # optional: prints the auth lines to paste into .env
-./up.sh                  # validates .env, then pulls the images and starts
+./up.sh                         # first run: creates ~/.config/ptmm/config.env, then stops
+vim ~/.config/ptmm/config.env   # TMDB key, MEDIA_DISK_MOUNT, CERT_DIR, HTTPS_PORT
+./gen-auth.sh                   # optional: prints the auth lines to paste into config.env
+./up.sh                         # validates config.env, then pulls the images and starts
 ```
+
+- **Config directory**: `~/.config/ptmm` of the invoking user (the real user
+  under `sudo`) holds everything the deployment keeps: `config.env`, the
+  database `ptmm.db` and its rotating backups in `bak/`. Back up this one
+  directory; the checkout holds no configuration. To put it elsewhere, set
+  `PTMM_CONFIG_DIR` in the environment (not in `config.env`, which lives
+  inside it), e.g. `PTMM_CONFIG_DIR=/srv/ptmm ./up.sh`, and the same for
+  `compose.sh` and `gen-auth.sh`. `config.env` holds secrets: `up.sh` creates
+  it with mode 600 and warns if others can read it.
 
 - **Images**: `up.sh` pulls `ghcr.io/shengt25/ptmm-backend` and
   `ghcr.io/shengt25/ptmm-web` (`latest`), which GitHub Actions builds for
@@ -69,13 +79,12 @@ vim .env                 # TMDB key, MEDIA_DISK_MOUNT, CERT_DIR, HTTPS_PORT
 - **Network and ports**: both containers use the host's network. nginx serves
   `HTTPS_PORT` (default 8443); the backend listens on `127.0.0.1:BACKEND_PORT`
   (default 8000), reachable only from the host, for nginx. Set `BACKEND_PORT`
-  in `.env` if 8000 is taken. Because `127.0.0.1` in the containers is the
+  in `config.env` if 8000 is taken. Because `127.0.0.1` in the containers is the
   host, a TMDB proxy running on the host is entered in Settings as usual, e.g.
   `http://127.0.0.1:7890`.
-- **User and data**: `up.sh` runs the backend as the invoking user
-  (`SUDO_UID`/`SUDO_GID` under `sudo`) and keeps the database plus its
-  rotating backups in `~/.config/ptmm`. Override with `PUID`/`PGID`/`DATA_DIR`
-  in `.env`.
+- **User**: `up.sh` runs the backend as the invoking user
+  (`SUDO_UID`/`SUDO_GID` under `sudo`). Override with `PUID`/`PGID` in
+  `config.env`; that user must own the config directory and the database.
 - **Media**: `MEDIA_DISK_MOUNT` is the mount point of the disk holding both
   the downloads and the library (e.g. `/media/h16t0`). It goes into the
   container as a single mount because hard links fail with
@@ -88,20 +97,25 @@ vim .env                 # TMDB key, MEDIA_DISK_MOUNT, CERT_DIR, HTTPS_PORT
   the host needs no hook for this container. A root-only private key is fine:
   nginx's master process reads it as root inside the container.
 - **Auth**: `gen-auth.sh` hashes the password inside the backend image. Keep
-  the single quotes around `AUTH_PASSWORD_HASH` in `.env` — without them
+  the single quotes around `AUTH_PASSWORD_HASH` in `config.env` — without them
   Compose expands the `$` signs in the bcrypt hash; `up.sh` refuses to start in
   that case.
 
 Useful commands:
 
 ```bash
-docker compose logs -f
-docker compose down
+./compose.sh logs -f
+./compose.sh ps
+./compose.sh down
 ./up.sh                 # update to the latest release (git pull first if compose.yaml changed)
 ```
 
+`compose.sh` runs `docker compose` with `--env-file` pointing at
+`config.env`; plain `docker compose` would look for a `.env` in the checkout
+and miss the settings.
+
 ## Configuration
 
-All deployment configuration lives in the gitignored root `.env`; use
-`.env.example` as its template. The backend receives secrets through Compose
+All deployment configuration lives in `config.env` in the config directory
+(see Deployment); `config.env.example` is its template. The backend receives secrets through Compose
 environment variables, so they are not copied into either image.
