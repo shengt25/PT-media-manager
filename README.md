@@ -64,9 +64,8 @@ vim .env                 # TMDB key, MEDIA_ROOT, CERT_DIR, HTTPS_PORT
 
 - **User and data**: `up.sh` runs the backend as the invoking user
   (`SUDO_UID`/`SUDO_GID` under `sudo`) and keeps the database plus its
-  rotating backups in `~/.config/ptmm` — the same place the old systemd install
-  used, so an existing `ptmm.db` is picked up as is. Override with
-  `PUID`/`PGID`/`DATA_DIR` in `.env`.
+  rotating backups in `~/.config/ptmm`. Override with `PUID`/`PGID`/`DATA_DIR`
+  in `.env`.
 - **Media**: mount a common parent of both the download and library
   directories as `MEDIA_ROOT`. Hard links fail with `Invalid cross-device link`
   if source and destination are separate container mounts. It is mounted at
@@ -88,20 +87,6 @@ docker compose logs -f
 docker compose down
 ./up.sh                 # rebuild and update after git pull
 ```
-
-### Migrating from the systemd install
-
-```bash
-sudo systemctl disable --now ptmm
-sudo rm /etc/systemd/system/ptmm.service && sudo systemctl daemon-reload
-# Remove the ptmm server block from the host nginx (sites-enabled/ptmm or similar),
-# then: sudo nginx -t && sudo systemctl reload nginx
-```
-
-Set `HTTPS_PORT` to the port the host nginx used, so existing port forwards
-and clients keep working, then `./up.sh`. The old `backend/.env` values
-(`TMDB_API_KEY`, `AUTH_*`, `JWT_SECRET`) can be copied into `.env`; quote the
-hash as described above.
 
 ## Configuration
 
