@@ -6,8 +6,6 @@ name: images
 on:
   push:
     tags: ["v*"]
-    # TEMPORARY: test builds from this branch; remove before merging.
-    branches: [feat/ci]
   workflow_dispatch:
 
 permissions:
