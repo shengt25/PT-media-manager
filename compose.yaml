@@ -1,0 +1,60 @@
+# Start with ./up.sh rather than `docker compose up` directly: it fills in
+# PUID/PGID/DATA_DIR from the invoking user and validates .env first.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    image: ptmm-backend
+    user: "${PUID:-1000}:${PGID:-1000}"
+    init: true
+    environment:
+      HOME: /tmp
+      DB_PATH: /data/ptmm.db
+      TMDB_API_KEY: "${TMDB_API_KEY}"
+      AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      AUTH_USERNAME: "${AUTH_USERNAME:-}"
+      AUTH_PASSWORD_HASH: "${AUTH_PASSWORD_HASH:-}"
+      JWT_SECRET: "${JWT_SECRET:-}"
+      UMASK: "${UMASK:-002}"
+    volumes:
+      # ptmm.db plus its rotating backups in bak/.
+      - "${DATA_DIR:-${HOME}/.config/ptmm}:/data"
+      # Mount one common parent so source and library paths remain on one
+      # filesystem from the container's perspective (required by hard links),
+      # at the same path as on the host since the DB stores absolute paths.
+      - "${MEDIA_ROOT}:${MEDIA_ROOT}"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        umask "$${UMASK}"
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    image: ptmm-web
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${HTTPS_PORT:-8443}:443"
+    environment:
+      CERT_FULLCHAIN_FILE: "${CERT_FULLCHAIN_FILE:-fullchain.pem}"
+      CERT_KEY_FILE: "${CERT_KEY_FILE:-privkey.pem}"
+      CERT_RELOAD_INTERVAL: "${CERT_RELOAD_INTERVAL:-3600}"
+    volumes:
+      # The whole directory, not the individual files: renewal tools usually
+      # replace files by rename, and a single-file bind mount would keep
+      # pointing at the old inode forever.
+      - "${CERT_DIR}:/certs:ro"
+    restart: unless-stopped

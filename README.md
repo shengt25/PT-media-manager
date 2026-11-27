@@ -12,25 +12,28 @@ Personal media management tool for Private Tracker (PT) downloads. Replaces Tiny
 ## Architecture
 
 ```
-browser → nginx (443) → frontend/dist/   (static files)
-                      → /api/* → uvicorn :8000 → FastAPI
-                                                 └── SQLite (backend/data/ptmm.db)
+browser → web container (TLS + static frontend)
+                      → /api/* → backend container → FastAPI
+                                                   └── SQLite (/data/ptmm.db)
 ```
 
 - **Frontend**: React + TypeScript + Vite + shadcn/ui, built to `frontend/dist/`
 - **Backend**: FastAPI + SQLModel + SQLite, runs with uvicorn
-- **nginx**: SSL termination, serves frontend, proxies `/api/` to backend
-- **systemd**: manages the backend process
+- **Docker Compose**: runs the backend (non-root, as `PUID:PGID`) and the web
+  container side by side
+- **nginx** (web container): TLS termination, serves the frontend, proxies
+  `/api/` to the backend, rate-limits login, reloads itself when the
+  certificate changes
 
 ## Project structure
 
 ```
 frontend/       React frontend
 backend/        FastAPI backend
-nginx/          nginx site config template
-systemd/        systemd service template
-install.sh      install / update script
-uninstall.sh    remove service and nginx config
+docker/         backend/frontend images and nginx configuration
+compose.yaml    container definitions
+up.sh           validated build/start helper
+gen-auth.sh     generates AUTH_PASSWORD_HASH / JWT_SECRET for .env
 .env.example    configuration template
 ```
 
@@ -50,26 +53,58 @@ npm run dev            # http://localhost:5173
 
 ## Deployment
 
-The installer supports two deployment modes:
-
-- **Internal**: HTTP, no auth, intended for access by NAS IP inside a trusted private network
-- **Public**: HTTPS + JWT auth, intended for domain-based internet access
+Needs only Docker with the Compose plugin on the server.
 
 ```bash
-# 1. Clone on server, set up config
 cp .env.example .env
-vim .env
-
-# 2. For public mode only, set up SSL first
-sudo certbot --nginx -d yourdomain.com
-
-# 3. Install
-bash install.sh
-
-# 4. Update (after git pull)
-bash install.sh
+vim .env                 # TMDB key, MEDIA_ROOT, CERT_DIR, HTTPS_PORT
+./gen-auth.sh            # optional: prints the auth lines to paste into .env
+./up.sh                  # validates .env, then builds and starts
 ```
+
+- **User and data**: `up.sh` runs the backend as the invoking user
+  (`SUDO_UID`/`SUDO_GID` under `sudo`) and keeps the database plus its
+  rotating backups in `~/.config/ptmm` — the same place the old systemd install
+  used, so an existing `ptmm.db` is picked up as is. Override with
+  `PUID`/`PGID`/`DATA_DIR` in `.env`.
+- **Media**: mount a common parent of both the download and library
+  directories as `MEDIA_ROOT`. Hard links fail with `Invalid cross-device link`
+  if source and destination are separate container mounts. It is mounted at
+  the same path as on the host because the database stores absolute paths.
+- **Certificates**: `CERT_DIR` is mounted read-only as a directory, and the web
+  container checks it every `CERT_RELOAD_INTERVAL` seconds (default 3600),
+  reloading nginx when the files change. Whatever renews the certificate on
+  the host needs no hook for this container. A root-only private key is fine:
+  nginx's master process reads it as root inside the container.
+- **Auth**: `gen-auth.sh` hashes the password inside the backend image. Keep
+  the single quotes around `AUTH_PASSWORD_HASH` in `.env` — without them
+  Compose expands the `$` signs in the bcrypt hash; `up.sh` refuses to start in
+  that case.
+
+Useful commands:
+
+```bash
+docker compose logs -f
+docker compose down
+./up.sh                 # rebuild and update after git pull
+```
+
+### Migrating from the systemd install
+
+```bash
+sudo systemctl disable --now ptmm
+sudo rm /etc/systemd/system/ptmm.service && sudo systemctl daemon-reload
+# Remove the ptmm server block from the host nginx (sites-enabled/ptmm or similar),
+# then: sudo nginx -t && sudo systemctl reload nginx
+```
+
+Set `HTTPS_PORT` to the port the host nginx used, so existing port forwards
+and clients keep working, then `./up.sh`. The old `backend/.env` values
+(`TMDB_API_KEY`, `AUTH_*`, `JWT_SECRET`) can be copied into `.env`; quote the
+hash as described above.
 
 ## Configuration
 
-All deployment config lives in `.env` (see `.env.example`). The only secret the backend needs is `TMDB_API_KEY`, which `install.sh` writes to `backend/.env` automatically.
+All deployment configuration lives in the gitignored root `.env`; use
+`.env.example` as its template. The backend receives secrets through Compose
+environment variables, so they are not copied into either image.

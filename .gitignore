@@ -6,7 +6,6 @@ __pycache__
 .env
 backend/data/
 *.egg-info
-deploy/.env
 frontend/dist/
-.ptmm-install
 /ptmm.db
+/docker-data/

@@ -1,25 +1,32 @@
+# Rendered by the nginx image's entrypoint (envsubst) into
+# /etc/nginx/conf.d/default.conf. Only ${CERT_*} are substituted — nginx's own
+# $variables are left alone (see NGINX_ENVSUBST_FILTER in web.Dockerfile).
+
 limit_req_zone $binary_remote_addr zone=ptmm_login:10m rate=5r/m;
 
 server {
-    listen ${HTTPS_PORT} ssl http2;
-    server_name ${DOMAIN};
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name _;
 
-    ssl_certificate     ${SSL_CERT};
-    ssl_certificate_key ${SSL_KEY};
+    ssl_certificate     /certs/${CERT_FULLCHAIN_FILE};
+    ssl_certificate_key /certs/${CERT_KEY_FILE};
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
     ssl_session_cache   shared:SSL:10m;
 
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header Referrer-Policy strict-origin-when-cross-origin;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
     limit_req_status 429;
 
     # Login rate limit only; regular API calls may be bursty during page loads.
     location = /api/auth/login {
         limit_req zone=ptmm_login burst=5 nodelay;
-        proxy_pass http://127.0.0.1:${BACKEND_PORT}/auth/login;
+        proxy_pass http://backend:8000/auth/login;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -27,18 +34,20 @@ server {
         proxy_read_timeout 120s;
     }
 
-    # API reverse proxy (strips /api prefix)
+    # API reverse proxy (strips /api prefix). Buffering off for the scrape
+    # progress SSE stream.
     location /api/ {
-        proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
+        proxy_pass http://backend:8000/;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 120s;
+        proxy_buffering off;
     }
 
-    # Frontend static files
-    root ${FRONTEND_ROOT};
+    root /usr/share/nginx/html;
     index index.html;
 
     location / {
@@ -47,6 +56,9 @@ server {
 
     location /assets/ {
         expires 1y;
+        # add_header in a location replaces the server-level ones, so repeat them.
         add_header Cache-Control "public, immutable";
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options nosniff always;
     }
 }
