@@ -57,7 +57,7 @@ Needs only Docker with the Compose plugin on the server.
 
 ```bash
 cp .env.example .env
-vim .env                 # TMDB key, MEDIA_ROOT, CERT_DIR, HTTPS_PORT
+vim .env                 # TMDB key, MEDIA_DISK_MOUNT, CERT_DIR, HTTPS_PORT
 ./gen-auth.sh            # optional: prints the auth lines to paste into .env
 ./up.sh                  # validates .env, then builds and starts
 ```
@@ -66,10 +66,12 @@ vim .env                 # TMDB key, MEDIA_ROOT, CERT_DIR, HTTPS_PORT
   (`SUDO_UID`/`SUDO_GID` under `sudo`) and keeps the database plus its
   rotating backups in `~/.config/ptmm`. Override with `PUID`/`PGID`/`DATA_DIR`
   in `.env`.
-- **Media**: mount a common parent of both the download and library
-  directories as `MEDIA_ROOT`. Hard links fail with `Invalid cross-device link`
-  if source and destination are separate container mounts. It is mounted at
-  the same path as on the host because the database stores absolute paths.
+- **Media**: `MEDIA_DISK_MOUNT` is the mount point of the disk holding both
+  the downloads and the library (e.g. `/media/h16t0`). It goes into the
+  container as a single mount because hard links fail with
+  `Invalid cross-device link` across separate container mounts, even on the
+  same disk, and at the same path as on the host because the database stores
+  absolute paths.
 - **Certificates**: `CERT_DIR` is mounted read-only as a directory, and the web
   container checks it every `CERT_RELOAD_INTERVAL` seconds (default 3600),
   reloading nginx when the files change. Whatever renews the certificate on

@@ -44,7 +44,7 @@ PUID="$(env_or_file PUID)"
 PGID="$(env_or_file PGID)"
 UMASK="$(env_or_file UMASK)"
 DATA_DIR="$(env_or_file DATA_DIR)"
-MEDIA_ROOT="$(env_or_file MEDIA_ROOT)"
+MEDIA_DISK_MOUNT="$(env_or_file MEDIA_DISK_MOUNT)"
 CERT_DIR="$(env_or_file CERT_DIR)"
 CERT_FULLCHAIN_FILE="$(env_or_file CERT_FULLCHAIN_FILE)"
 CERT_KEY_FILE="$(env_or_file CERT_KEY_FILE)"
@@ -69,12 +69,12 @@ for key in PUID PGID; do
 done
 [[ "$UMASK" =~ ^[0-7]{3,4}$ ]] || die "UMASK must be an octal value such as 002 or 0022"
 
-for key in TMDB_API_KEY MEDIA_ROOT CERT_DIR; do
+for key in TMDB_API_KEY MEDIA_DISK_MOUNT CERT_DIR; do
     [[ -n "${!key}" ]] || die "$key must be set in .env or the environment"
 done
 [[ "$TMDB_API_KEY" != replace-with-* ]] || die "TMDB_API_KEY is still the placeholder from .env.example"
 
-[[ -d "$MEDIA_ROOT" ]] || die "MEDIA_ROOT is not a directory: $MEDIA_ROOT"
+[[ -d "$MEDIA_DISK_MOUNT" ]] || die "MEDIA_DISK_MOUNT is not a directory: $MEDIA_DISK_MOUNT"
 [[ -d "$CERT_DIR" ]] || die "CERT_DIR is not a directory: $CERT_DIR"
 # Existence only: the key is typically root-only, which is fine — nginx's
 # master process reads it as root inside the container.
@@ -105,7 +105,7 @@ export PUID PGID UMASK DATA_DIR CERT_FULLCHAIN_FILE CERT_KEY_FILE
 
 echo "Starting PT Media Manager"
 echo "  Backend UID:GID  $PUID:$PGID"
-echo "  Media root       $MEDIA_ROOT"
+echo "  Media disk       $MEDIA_DISK_MOUNT"
 echo "  Database dir     $DATA_DIR"
 echo "  Certificates     $CERT_DIR ($CERT_FULLCHAIN_FILE, $CERT_KEY_FILE)"
 
