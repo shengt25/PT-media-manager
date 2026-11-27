@@ -38,6 +38,18 @@ die() {
     exit 1
 }
 
+# Default: pull the published images. --build: build them from this checkout.
+# Other arguments go to `docker compose up`.
+BUILD=false
+args=()
+for arg in "$@"; do
+    if [[ "$arg" == "--build" ]]; then
+        BUILD=true
+    else
+        args+=("$arg")
+    fi
+done
+
 [[ -f "$ENV_FILE" ]] || die ".env not found — copy .env.example to .env and edit it"
 
 PUID="$(env_or_file PUID)"
@@ -124,4 +136,11 @@ echo "  Certificates     $CERT_DIR ($CERT_FULLCHAIN_FILE, $CERT_KEY_FILE)"
 
 cd "$PROJECT_ROOT"
 docker compose config --quiet
-docker compose up -d --build "$@"
+if [[ "$BUILD" == true ]]; then
+    docker compose up -d --build ${args[@]+"${args[@]}"}
+else
+    docker compose pull
+    docker compose up -d ${args[@]+"${args[@]}"}
+fi
+# Drop the image layers the update left untagged.
+docker image prune -f

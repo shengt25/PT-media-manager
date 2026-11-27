@@ -32,7 +32,7 @@ frontend/       React frontend
 backend/        FastAPI backend
 docker/         backend/frontend images and nginx configuration
 compose.yaml    container definitions
-up.sh           validated build/start helper
+up.sh           validated pull/start helper
 gen-auth.sh     generates AUTH_PASSWORD_HASH / JWT_SECRET for .env
 .env.example    configuration template
 ```
@@ -59,8 +59,13 @@ Needs only Docker with the Compose plugin on the server.
 cp .env.example .env
 vim .env                 # TMDB key, MEDIA_DISK_MOUNT, CERT_DIR, HTTPS_PORT
 ./gen-auth.sh            # optional: prints the auth lines to paste into .env
-./up.sh                  # validates .env, then builds and starts
+./up.sh                  # validates .env, then pulls the images and starts
 ```
+
+- **Images**: `up.sh` pulls `ghcr.io/shengt25/ptmm-backend` and
+  `ghcr.io/shengt25/ptmm-web` (`latest`), which GitHub Actions builds for
+  linux/amd64 on every `v*` tag. `./up.sh --build` builds them from the
+  checkout instead. Either way it then removes the dangling old images.
 
 - **User and data**: `up.sh` runs the backend as the invoking user
   (`SUDO_UID`/`SUDO_GID` under `sudo`) and keeps the database plus its
@@ -87,7 +92,7 @@ Useful commands:
 ```bash
 docker compose logs -f
 docker compose down
-./up.sh                 # rebuild and update after git pull
+./up.sh                 # update to the latest release (git pull first if compose.yaml changed)
 ```
 
 ## Configuration
