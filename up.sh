@@ -2,12 +2,13 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="$PROJECT_ROOT/.env"
+# shellcheck source=docker/config-dir.sh
+source "$PROJECT_ROOT/docker/config-dir.sh"
 
-# Raw value of KEY from .env, with one layer of surrounding quotes removed.
+# Raw value of KEY from config.env, with one layer of surrounding quotes removed.
 read_env_value() {
     local key="$1" value
-    [[ -f "$ENV_FILE" ]] || return 0
+    [[ -f "$CONFIG_FILE" ]] || return 0
     value="$(awk -F= -v key="$key" '
         /^[[:space:]]*#/ { next }
         $1 == key {
@@ -16,7 +17,7 @@ read_env_value() {
             print
             exit
         }
-    ' "$ENV_FILE")"
+    ' "$CONFIG_FILE")"
     if [[ "$value" =~ ^\'(.*)\'$ || "$value" =~ ^\"(.*)\"$ ]]; then
         value="${BASH_REMATCH[1]}"
     fi
@@ -50,12 +51,38 @@ for arg in "$@"; do
     fi
 done
 
-[[ -f "$ENV_FILE" ]] || die ".env not found — copy .env.example to .env and edit it"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    # A .env left in the checkout is an older setup: say where it goes rather
+    # than starting over from the template.
+    if [[ -f "$PROJECT_ROOT/.env" ]]; then
+        die "the config now lives in $CONFIG_FILE, not in the checkout. Move it:
+  mkdir -p '$PTMM_CONFIG_DIR' && mv '$PROJECT_ROOT/.env' '$CONFIG_FILE' && chmod 600 '$CONFIG_FILE'"
+    fi
+    created_dir=false
+    [[ -d "$PTMM_CONFIG_DIR" ]] || created_dir=true
+    mkdir -p "$PTMM_CONFIG_DIR"
+    (umask 077 && cp "$PROJECT_ROOT/config.env.example" "$CONFIG_FILE")
+    # Under sudo, hand them to the real user, who runs the backend.
+    if [[ -n "${SUDO_UID:-}" ]]; then
+        chown "$SUDO_UID:$SUDO_GID" "$CONFIG_FILE"
+        if [[ "$created_dir" == true ]]; then
+            chown "$SUDO_UID:$SUDO_GID" "$PTMM_CONFIG_DIR"
+        fi
+    fi
+    echo "Created $CONFIG_FILE from config.env.example."
+    echo "Fill it in, then run ./up.sh again."
+    exit 1
+fi
+
+# It holds the TMDB key and the auth secrets.
+perm="$(stat -c '%a' "$CONFIG_FILE" 2>/dev/null || stat -f '%Lp' "$CONFIG_FILE")"
+if (( 8#$perm & 077 )); then
+    echo "Warning: $CONFIG_FILE is readable by others (mode $perm); chmod 600 it." >&2
+fi
 
 PUID="$(env_or_file PUID)"
 PGID="$(env_or_file PGID)"
 UMASK="$(env_or_file UMASK)"
-DATA_DIR="$(env_or_file DATA_DIR)"
 MEDIA_DISK_MOUNT="$(env_or_file MEDIA_DISK_MOUNT)"
 CERT_DIR="$(env_or_file CERT_DIR)"
 CERT_FULLCHAIN_FILE="$(env_or_file CERT_FULLCHAIN_FILE)"
@@ -63,16 +90,10 @@ CERT_KEY_FILE="$(env_or_file CERT_KEY_FILE)"
 TMDB_API_KEY="$(env_or_file TMDB_API_KEY)"
 AUTH_ENABLED="$(env_or_file AUTH_ENABLED)"
 
-# Under sudo, run the containers as (and keep data with) the real user, not root.
-INVOKING_HOME="$HOME"
-if [[ -n "${SUDO_USER:-}" ]]; then
-    INVOKING_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
-fi
-
+# Under sudo, run the backend as the real user, not root.
 PUID="${PUID:-${SUDO_UID:-$(id -u)}}"
 PGID="${PGID:-${SUDO_GID:-$(id -g)}}"
 UMASK="${UMASK:-002}"
-DATA_DIR="${DATA_DIR:-$INVOKING_HOME/.config/ptmm}"
 CERT_FULLCHAIN_FILE="${CERT_FULLCHAIN_FILE:-fullchain.pem}"
 CERT_KEY_FILE="${CERT_KEY_FILE:-privkey.pem}"
 
@@ -93,9 +114,9 @@ done
 [[ "$HTTPS_PORT" != "$BACKEND_PORT" ]] || die "HTTPS_PORT and BACKEND_PORT must differ"
 
 for key in TMDB_API_KEY MEDIA_DISK_MOUNT CERT_DIR; do
-    [[ -n "${!key}" ]] || die "$key must be set in .env or the environment"
+    [[ -n "${!key}" ]] || die "$key must be set in $CONFIG_FILE"
 done
-[[ "$TMDB_API_KEY" != replace-with-* ]] || die "TMDB_API_KEY is still the placeholder from .env.example"
+[[ "$TMDB_API_KEY" != replace-with-* ]] || die "TMDB_API_KEY is still the placeholder from config.env.example"
 
 [[ -d "$MEDIA_DISK_MOUNT" ]] || die "MEDIA_DISK_MOUNT is not a directory: $MEDIA_DISK_MOUNT"
 # Cert dirs are often root-only (e.g. /etc/nginx/certs), which is fine: Docker
@@ -122,37 +143,42 @@ if [[ "$AUTH_ENABLED" == "true" ]]; then
     for key in AUTH_USERNAME AUTH_PASSWORD_HASH JWT_SECRET; do
         [[ -n "$(env_or_file "$key")" ]] || die "AUTH_ENABLED=true requires $key (generate with ./gen-auth.sh)"
     done
-    # Compose expands $ inside unquoted/double-quoted .env values, which
-    # silently mangles a bcrypt hash ($2b$12$...).
-    raw_hash="$(awk -F= '$1 == "AUTH_PASSWORD_HASH" { sub(/^[^=]*=/, ""); print; exit }' "$ENV_FILE")"
+    # Compose expands $ inside unquoted/double-quoted values, which silently
+    # mangles a bcrypt hash ($2b$12$...).
+    raw_hash="$(awk -F= '$1 == "AUTH_PASSWORD_HASH" { sub(/^[^=]*=/, ""); print; exit }' "$CONFIG_FILE")"
     if [[ -n "$raw_hash" && "$raw_hash" == *'$'* && ! "$raw_hash" =~ ^\'.*\'$ ]]; then
-        die "AUTH_PASSWORD_HASH in .env must be wrapped in single quotes: AUTH_PASSWORD_HASH='\$2b\$12\$...'"
+        die "AUTH_PASSWORD_HASH in $CONFIG_FILE must be wrapped in single quotes: AUTH_PASSWORD_HASH='\$2b\$12\$...'"
     fi
 fi
 
-mkdir -p "$DATA_DIR"
-[[ -w "$DATA_DIR" ]] || die "database directory is not writable: $DATA_DIR"
-if [[ -e "$DATA_DIR/ptmm.db" ]]; then
-    owner="$(stat -c '%u' "$DATA_DIR/ptmm.db" 2>/dev/null || stat -f '%u' "$DATA_DIR/ptmm.db")"
-    [[ "$owner" == "$PUID" ]] || die "$DATA_DIR/ptmm.db is owned by uid $owner, expected $PUID (chown it, or set PUID)"
+# The backend keeps ptmm.db and bak/ here too.
+[[ -w "$PTMM_CONFIG_DIR" ]] || die "config directory is not writable: $PTMM_CONFIG_DIR"
+if [[ -e "$PTMM_CONFIG_DIR/ptmm.db" ]]; then
+    owner="$(stat -c '%u' "$PTMM_CONFIG_DIR/ptmm.db" 2>/dev/null || stat -f '%u' "$PTMM_CONFIG_DIR/ptmm.db")"
+    [[ "$owner" == "$PUID" ]] || die "$PTMM_CONFIG_DIR/ptmm.db is owned by uid $owner, expected $PUID (chown it, or set PUID)"
 fi
 
-export PUID PGID UMASK DATA_DIR CERT_FULLCHAIN_FILE CERT_KEY_FILE HTTPS_PORT BACKEND_PORT
+export PUID PGID UMASK CERT_FULLCHAIN_FILE CERT_KEY_FILE HTTPS_PORT BACKEND_PORT
 
 echo "Starting PT Media Manager"
+echo "  Config dir       $PTMM_CONFIG_DIR"
 echo "  Backend UID:GID  $PUID:$PGID"
 echo "  Media disk       $MEDIA_DISK_MOUNT"
-echo "  Database dir     $DATA_DIR"
 echo "  Certificates     $CERT_DIR ($CERT_FULLCHAIN_FILE, $CERT_KEY_FILE)"
 echo "  Ports            HTTPS $HTTPS_PORT, backend 127.0.0.1:$BACKEND_PORT"
 
+# --env-file on every call: without it Compose reads only a .env in the checkout.
+compose() {
+    docker compose --env-file "$CONFIG_FILE" "$@"
+}
+
 cd "$PROJECT_ROOT"
-docker compose config --quiet
+compose config --quiet
 if [[ "$BUILD" == true ]]; then
-    docker compose up -d --build ${args[@]+"${args[@]}"}
+    compose up -d --build ${args[@]+"${args[@]}"}
 else
-    docker compose pull
-    docker compose up -d ${args[@]+"${args[@]}"}
+    compose pull
+    compose up -d ${args[@]+"${args[@]}"}
 fi
 # Drop the image layers the update left untagged.
 docker image prune -f

@@ -1,5 +1,8 @@
-# Start with ./up.sh rather than `docker compose up` directly: it fills in
-# PUID/PGID/DATA_DIR from the invoking user and validates .env first.
+# Start with ./up.sh and use ./compose.sh for other commands, rather than
+# `docker compose` directly: the values below come from
+# $PTMM_CONFIG_DIR/config.env (default ~/.config/ptmm), which they pass with
+# --env-file. up.sh also validates it and fills in PUID/PGID from the
+# invoking user.
 #
 # Both services use the host's network, so 127.0.0.1 inside them is the host:
 # a TMDB proxy on the host is set as http://127.0.0.1:<port>, as without
@@ -25,8 +28,9 @@ services:
       JWT_SECRET: "${JWT_SECRET:-}"
       UMASK: "${UMASK:-002}"
     volumes:
-      # ptmm.db plus its rotating backups in bak/.
-      - "${DATA_DIR:-${HOME}/.config/ptmm}:/data"
+      # The config dir: ptmm.db and its rotating backups in bak/, next to
+      # config.env.
+      - "${PTMM_CONFIG_DIR:?start with ./up.sh, or use ./compose.sh}:/data"
       # The whole disk as one mount: hard links fail across container mounts
       # even on the same disk. Same path as on the host, since the DB stores
       # absolute paths.
