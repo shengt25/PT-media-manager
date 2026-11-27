@@ -76,8 +76,9 @@ done
 
 [[ -d "$MEDIA_DISK_MOUNT" ]] || die "MEDIA_DISK_MOUNT is not a directory: $MEDIA_DISK_MOUNT"
 # Cert dirs are often root-only (e.g. /etc/nginx/certs), which is fine: Docker
-# mounts them as root and nginx's master process reads them as root. So only
-# check what we can see — directly, or via sudo if it needs no password.
+# mounts them as root and nginx's master process reads them as root. Check as
+# the invoking user first, then via sudo (silently if it needs no password,
+# otherwise prompting once).
 cert_test() {
     test "$@" 2>/dev/null || sudo -n test "$@" 2>/dev/null
 }
